@@ -1,0 +1,27 @@
+{
+  "name": "chesonline-warranty",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CHES Online — device registration, warranty tracking and service request platform",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node scripts/seed.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.10.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "multer": "^2.3.0",
+    "nodemailer": "^9.1.1",
+    "pdf-parse": "^1.1.1"
+  }
+}

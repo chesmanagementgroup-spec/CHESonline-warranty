@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHES Online — Equipment &amp; Warranty Portal</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%231a1a18%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Georgia,serif%27 font-size=%2716%27 fill=%27%23fff%27 text-anchor=%27middle%27%3EC%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+
+<div class="topbar">
+  <span></span>
+  <span class="topbar-title">CHES Management Group</span>
+  <span class="topbar-actions">
+    <button type="button" id="langToggle" data-i18n="lang_toggle">中文</button>
+  </span>
+</div>
+
+<header class="header">
+  <div class="logo">CHES<span class="logo-dot">.</span></div>
+  <div class="header-sub" data-i18n="brand_sub">Equipment &amp; Warranty Portal</div>
+  <div class="header-rule"></div>
+  <div class="header-title" data-i18n="signin_title">Sign in</div>
+</header>
+
+<main class="page">
+
+  <!-- Step 1: email -->
+  <div class="section" id="stepEmail">
+    <div class="section-header">
+      <div class="section-num">1</div>
+      <div class="section-title" data-i18n="signin_title">Sign in</div>
+    </div>
+    <div class="section-body">
+      <p class="section-note" data-i18n="signin_lead"></p>
+      <form id="emailForm" novalidate>
+        <div class="field">
+          <label for="email"><span data-i18n="signin_email">Email address</span> <span class="req">*</span></label>
+          <input type="email" id="email" name="email" autocomplete="email" required placeholder="name@yourbusiness.com.au">
+        </div>
+        <button class="btn btn-block" type="submit" id="sendBtn" data-i18n="signin_send">Send me a code</button>
+      </form>
+      <div id="emailStatus" class="status"></div>
+    </div>
+  </div>
+
+  <!-- Step 2: code -->
+  <div class="section" id="stepCode" hidden>
+    <div class="section-header">
+      <div class="section-num">2</div>
+      <div class="section-title" data-i18n="signin_code">6-digit code</div>
+    </div>
+    <div class="section-body">
+      <p class="section-note" id="codeLead"></p>
+      <form id="codeForm" novalidate>
+        <div class="field">
+          <label for="code"><span data-i18n="signin_code">6-digit code</span> <span class="req">*</span></label>
+          <input type="text" id="code" name="code" inputmode="numeric" autocomplete="one-time-code"
+                 maxlength="6" pattern="[0-9]{6}" placeholder="••••••" required>
+        </div>
+        <button class="btn btn-block" type="submit" id="verifyBtn" data-i18n="signin_verify">Sign in</button>
+      </form>
+      <div class="btn-row" style="margin-top:14px;">
+        <button class="btn btn-ghost btn-sm" type="button" id="backBtn" data-i18n="signin_back">Use a different email</button>
+        <button class="btn btn-ghost btn-sm" type="button" id="resendBtn" data-i18n="signin_resend">Send a new code</button>
+      </div>
+      <div id="codeStatus" class="status"></div>
+    </div>
+  </div>
+
+  <!-- What the portal does -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">?</div>
+      <div class="section-title" data-i18n="welcome_title">What you can do here</div>
+    </div>
+    <div class="section-body">
+      <ul style="list-style:none; display:grid; gap:12px; font-size:13.5px; color:var(--text-2);">
+        <li style="display:flex; gap:10px;"><span style="color:var(--text-3);">01</span><span data-i18n="welcome_1"></span></li>
+        <li style="display:flex; gap:10px;"><span style="color:var(--text-3);">02</span><span data-i18n="welcome_2"></span></li>
+        <li style="display:flex; gap:10px;"><span style="color:var(--text-3);">03</span><span data-i18n="welcome_3"></span></li>
+        <li style="display:flex; gap:10px;"><span style="color:var(--text-3);">04</span><span data-i18n="welcome_4"></span></li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Staff sign-in -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-num">◆</div>
+      <div class="section-title" data-i18n="signin_staff">CHES staff sign-in</div>
+    </div>
+    <div class="section-body">
+      <form id="staffForm" novalidate>
+        <div class="row-2">
+          <div class="field">
+            <label for="staffEmail" data-i18n="signin_email">Email address</label>
+            <input type="email" id="staffEmail" autocomplete="username">
+          </div>
+          <div class="field">
+            <label for="staffPassword" data-i18n="signin_password">Password</label>
+            <input type="password" id="staffPassword" autocomplete="current-password">
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-block" type="submit" id="staffBtn" data-i18n="nav_admin">CHES console</button>
+      </form>
+      <div id="staffStatus" class="status"></div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <strong>CHES Online</strong> &nbsp;·&nbsp; chesmanagementgroup@gmail.com<br>
+    <span>© 2026 CHES Management Group. All rights reserved.</span>
+  </footer>
+</main>
+
+<script src="/assets/i18n.js"></script>
+<script src="/assets/common.js"></script>
+<script src="/assets/signin.js"></script>
+</body>
+</html>

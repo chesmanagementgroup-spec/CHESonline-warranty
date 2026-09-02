@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHES Console — Warranty Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%231a1a18%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-family=%27Georgia,serif%27 font-size=%2716%27 fill=%27%23fff%27 text-anchor=%27middle%27%3EC%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+
+<div class="topbar">
+  <span class="topbar-actions"><span id="staffName"></span></span>
+  <span class="topbar-title" data-i18n="a_console">CHES console</span>
+  <span class="topbar-actions">
+    <button type="button" id="langToggle" data-i18n="lang_toggle">中文</button>
+    <button type="button" id="signOut" data-i18n="nav_signout">Sign out</button>
+  </span>
+</div>
+
+<main class="page page-wide">
+
+  <div id="smtpWarning" class="status" style="margin-bottom:14px;"></div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="dashboard" data-i18n="a_tab_dashboard">Dashboard</button>
+    <button class="tab" data-tab="invoices" data-i18n="a_tab_invoices">Invoice import</button>
+    <button class="tab" data-tab="claims" data-i18n="a_tab_claims">Service requests</button>
+    <button class="tab" data-tab="customers" data-i18n="a_tab_customers">Customers</button>
+    <button class="tab" data-tab="devices" data-i18n="a_tab_devices">Equipment</button>
+    <button class="tab" data-tab="manufacturers" data-i18n="a_tab_manufacturers">Manufacturers</button>
+    <button class="tab" data-tab="emails" data-i18n="a_tab_emails">Email log</button>
+  </div>
+
+  <section id="panel-dashboard">
+    <div class="stat-grid" id="statGrid"></div>
+    <div class="section">
+      <div class="section-header">
+        <div class="section-num">!</div>
+        <div class="section-title" data-i18n="a_expiring_title">Warranties expiring soon</div>
+      </div>
+      <div class="section-body" id="expiringBody"></div>
+    </div>
+  </section>
+
+  <section id="panel-invoices" hidden>
+    <div class="section">
+      <div class="section-header">
+        <div class="section-num">1</div>
+        <div class="section-title" data-i18n="a_inv_title">Import an invoice</div>
+      </div>
+      <div class="section-body">
+        <p class="section-note" data-i18n="a_inv_lead"></p>
+        <div class="upload-zone" id="invoiceZone">
+          <input type="file" id="invoiceFile" accept=".pdf,.csv,application/pdf,text/csv">
+          <div class="upload-label" data-i18n="a_inv_drop">Upload invoice</div>
+          <div class="upload-hint" data-i18n="a_inv_hint">PDF or CSV · up to 25 MB</div>
+        </div>
+        <div id="invoiceStatus" class="status"></div>
+      </div>
+    </div>
+    <div id="invoiceDraft"></div>
+    <div class="section">
+      <div class="section-header">
+        <div class="section-num">2</div>
+        <div class="section-title" data-i18n="a_inv_history">Recent imports</div>
+      </div>
+      <div class="section-body" id="invoiceHistory"></div>
+    </div>
+  </section>
+
+  <section id="panel-claims" hidden>
+    <div class="toolbar">
+      <input type="search" id="claimSearch" class="grow" data-i18n-placeholder="a_search_ph" placeholder="Search…">
+      <select id="claimFilter">
+        <option value="open" data-i18n="a_filter_open">Open only</option>
+        <option value="" data-i18n="a_filter_all">All statuses</option>
+      </select>
+    </div>
+    <div id="claimTable"></div>
+  </section>
+
+  <section id="panel-customers" hidden>
+    <div class="toolbar">
+      <input type="search" id="customerSearch" class="grow" data-i18n-placeholder="a_search_ph" placeholder="Search…">
+      <button class="btn btn-sm" id="newCustomerBtn" data-i18n="a_new_customer">New customer</button>
+    </div>
+    <div id="customerTable"></div>
+  </section>
+
+  <section id="panel-devices" hidden>
+    <div class="toolbar">
+      <input type="search" id="deviceSearch" class="grow" data-i18n-placeholder="a_search_ph" placeholder="Search…">
+      <button class="btn btn-sm" id="newDeviceBtn" data-i18n="a_new_device">Add equipment</button>
+    </div>
+    <div id="deviceTable"></div>
+  </section>
+
+  <section id="panel-manufacturers" hidden>
+    <div class="toolbar">
+      <span class="grow"></span>
+      <button class="btn btn-sm" id="newManufacturerBtn" data-i18n="a_new_manufacturer">Add manufacturer</button>
+    </div>
+    <div id="manufacturerTable"></div>
+  </section>
+
+  <section id="panel-emails" hidden>
+    <div id="emailTable"></div>
+  </section>
+
+  <footer class="footer">
+    <strong>CHES Online</strong> &nbsp;·&nbsp; chesmanagementgroup@gmail.com
+  </footer>
+</main>
+
+<script src="/assets/i18n.js"></script>
+<script src="/assets/common.js"></script>
+<script src="/assets/admin.js"></script>
+</body>
+</html>
