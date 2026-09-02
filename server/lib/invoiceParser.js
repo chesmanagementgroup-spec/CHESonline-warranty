@@ -23,6 +23,15 @@ const KNOWN_BRANDS = [
   'Luus', 'True', 'Polar', 'Buffalo', 'Bonn', 'Birko', 'Zip', 'Semak',
   'Menumaster', 'Panasonic', 'Sharp', 'Sammic', 'Electrolux', 'Woodson',
   'Austheat', 'Trumake', 'Nuova Simonelli', 'La Marzocco', 'Mazzer',
+  // Supplier and brand names from the CHES supplier list, plus the brands that
+  // turn up on CHES invoices.
+  'B+S', 'Cookrite', 'Atosa', 'Jasper', 'Eswood', 'Meiko', 'UPster', 'Stoddart',
+  'Woodson', 'TurboChef', 'Koldtech', 'Airex', 'Aristarco', 'Giorik', 'Synergy',
+  'Adande', 'Comcater', 'Rational', 'Mareno', 'Tecnomac', 'Trueheat', 'Brema',
+  'Comenda', 'PureVac', 'Mibrasa', 'Frymaster', 'Middleby', 'Moffat', 'Washtech',
+  'Scotsman', 'Hussmann', 'Robalec', 'Dipo', 'Robatherm', 'Noaw', 'Uropa',
+  'Nisbets', 'Apuro', 'Thor', 'Waring', 'Classeq', 'Winterhalter', 'Vitamix',
+  'ITV', 'Irinox', 'ActiveCore', 'ProSpec', 'Scots Ice', 'Lancer',
 ];
 
 const BRAND_ALIASES = { BLUESEAL: 'Blue Seal' };
@@ -50,13 +59,21 @@ function isNonEquipment(desc) {
 
 function detectBrand(desc) {
   const text = String(desc || '');
-  let best = '';
+  let best = null;
   for (const brand of KNOWN_BRANDS) {
-    const re = new RegExp(String.raw`(^|[^A-Za-z0-9])${brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^A-Za-z0-9]|$)`, 'i');
-    if (re.test(text) && brand.length > best.length) best = brand;
+    const escaped = brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(^|[^A-Za-z0-9])${escaped}([^A-Za-z0-9]|$)`, 'i');
+    const m = re.exec(text);
+    if (!m) continue;
+    // Whichever brand is named first wins, so "MEIKO UPster H 500" is a Meiko
+    // and not an UPster; a longer name breaks a tie at the same position.
+    const at = m.index + m[1].length;
+    if (!best || at < best.at || (at === best.at && brand.length > best.brand.length)) {
+      best = { brand, at };
+    }
   }
   if (!best) return '';
-  return BRAND_ALIASES[best.toUpperCase()] || best;
+  return BRAND_ALIASES[best.brand.toUpperCase()] || best.brand;
 }
 
 /**

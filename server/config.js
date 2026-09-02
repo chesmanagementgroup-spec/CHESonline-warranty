@@ -60,7 +60,14 @@ const config = {
   loginCodeTtlMinutes: int(process.env.LOGIN_CODE_TTL_MINUTES, 15),
   defaultWarrantyMonths: int(process.env.DEFAULT_WARRANTY_MONTHS, 12),
   ches: {
-    serviceEmail: (process.env.CHES_SERVICE_EMAIL || 'chesmanagementgroup@gmail.com').trim(),
+    // Where new service requests land. Accepts a comma-separated list so the
+    // whole after-sales team is notified, not one inbox.
+    serviceEmail: (process.env.CHES_SERVICE_EMAIL || 'chesmanagementgroup@gmail.com')
+      .split(',').map((a) => a.trim()).filter(Boolean).join(', '),
+    // The address customers are given for out-of-warranty help.
+    afterSalesEmail: (process.env.CHES_AFTERSALES_EMAIL
+      || process.env.CHES_SERVICE_EMAIL
+      || 'chesmanagementgroup@gmail.com').split(',')[0].trim(),
     fromName: (process.env.CHES_FROM_NAME || 'CHES Online').trim(),
     fromEmail: (process.env.CHES_FROM_EMAIL || 'chesmanagementgroup@gmail.com').trim(),
   },

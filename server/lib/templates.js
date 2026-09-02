@@ -119,6 +119,19 @@ function newClaimToChes({ claim, customer, device, warranty, attachments }) {
   };
 }
 
+/** What a customer is told when the machine is no longer covered. */
+function outOfWarrantyNote(device) {
+  return [
+    'THIS MACHINE IS OUT OF WARRANTY',
+    device && device.warranty_end ? `  Cover ended ${device.warranty_end}.` : null,
+    '  You are free to arrange your own repairer for this one.',
+    '  If you would rather we introduced a technician and helped coordinate the',
+    `  repair, email ${config.ches.afterSalesEmail} and we will help.`,
+    '  Any work on an out-of-warranty machine is chargeable, and we will confirm',
+    '  the cost with you before anything goes ahead.',
+  ].filter(Boolean).join('\n');
+}
+
 /** Acknowledgement to the customer who lodged the request. */
 function claimReceipt({ claim, customer, device, portalUrl }) {
   return {
@@ -132,12 +145,14 @@ function claimReceipt({ claim, customer, device, portalUrl }) {
         ['Category', claim.category],
         ['Lodged', claim.created_at],
       ]),
-      'What happens next\n'
-      + '  1. Our team reviews the request and confirms your warranty status.\n'
-      + '  2. Where the fault is covered by the manufacturer, we lodge the job\n'
-      + '     with them on your behalf and send you their job number.\n'
-      + '  3. The technician or manufacturer contacts your on-site person to\n'
-      + '     arrange attendance.',
+      claim.under_warranty
+        ? 'What happens next\n'
+          + '  1. Our team reviews the request and confirms your warranty status.\n'
+          + '  2. Where the fault is covered by the manufacturer, we lodge the job\n'
+          + '     with them on your behalf and send you their job number.\n'
+          + '  3. The technician or manufacturer contacts your on-site person to\n'
+          + '     arrange attendance.'
+        : outOfWarrantyNote(device),
       signInBlock(portalUrl),
       `Please quote ${claim.reference} in any correspondence.`,
       RULE,
@@ -256,6 +271,7 @@ module.exports = {
   loginCode,
   newClaimToChes,
   claimReceipt,
+  outOfWarrantyNote,
   forwardToManufacturer,
   claimStatusUpdate,
   equipmentHandover,

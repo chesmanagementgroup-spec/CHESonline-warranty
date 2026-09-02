@@ -159,6 +159,7 @@ server/
     invoices.js         invoice upload → draft → commit to device records
   lib/
     invoiceParser.js    reads Xero PDF/CSV line items, guesses brand and model
+    suppliers.js        the supplier service desks, brands and warranty terms
     dates.js            date parsing and the warranty calculation
     templates.js        every email the platform sends
     models.js           shared queries and the warranty decoration
@@ -178,12 +179,33 @@ legacy/                 the retired 2025 claim form — see legacy/README.md
 
 ## Things worth knowing
 
-**Manufacturers.** `npm run seed` adds the brands CHES commonly resells, but
-**with no service email addresses** — those change, and sending a warranty job
-to a stale address helps nobody. Fill each one in under *Manufacturers* the
-first time you forward a job to that brand; after that the address is filled in
-automatically. Where a brand uses an online portal instead of email, put the
-portal URL on the manufacturer record and the forward screen will link to it.
+**Supplier service desks.** `npm run seed` loads the CHES supplier list from
+`server/lib/suppliers.js` — service address, spares CC, booking portal, phone,
+the brands each desk covers, and the conditions that decide a claim. Editing a
+desk in the console is safe: the seed only fills blank fields, it never
+overwrites a correction.
+
+Two things follow from that list:
+
+* **The brand on the machine is routed to the desk that services it.** A
+  Waldorf oven reaches Moffat, an Apuro fryer reaches Uropa, a Hallde reaches
+  Roband. Add brands to a desk's *aliases* field as new ones come in.
+* **A supplier's standard warranty is applied on import** — but only for the
+  desks that state one unambiguously (Moffat 24, Roband 12, Unox 12, Stoddart
+  12, Scots Ice 12, Williams 24, SIMCO 24). Where cover varies by model the
+  field is deliberately blank, because a wrong default silently puts a wrong
+  expiry on real equipment. Precedence is always: **the warranty written on
+  the invoice → the supplier's standard term → 12 months**.
+
+Before a job is sent, the forward screen shows that desk's own conditions —
+SIMCO's picking slip, Stoddart's prior authorisation, Meiko's 90-day
+registration, Williams' remote units being 12 months parts-only.
+
+**Out of warranty.** When a customer picks a machine whose cover has ended, the
+form says so before they write anything: they may arrange their own repairer,
+or email `CHES_AFTERSALES_EMAIL` and CHES will introduce a technician and help
+coordinate the repair, chargeable and quoted first. The request is still
+recorded, so nothing is lost, and the receipt repeats the position in writing.
 
 **No card details.** The platform never asks for a card. When out-of-warranty
 work or freight has to be paid for, agree the cost first and take payment

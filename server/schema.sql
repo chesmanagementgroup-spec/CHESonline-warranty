@@ -33,8 +33,14 @@ CREATE TABLE IF NOT EXISTS manufacturers (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,
   service_email TEXT NOT NULL DEFAULT '',
+  cc_email      TEXT NOT NULL DEFAULT '',   -- spares desk, account manager
   portal_url    TEXT NOT NULL DEFAULT '',
   phone         TEXT NOT NULL DEFAULT '',
+  -- Brands this supplier services, so a "Waldorf" oven reaches Moffat.
+  aliases       TEXT NOT NULL DEFAULT '',
+  -- Applied to imported equipment when the invoice does not state its own.
+  default_warranty_months INTEGER,
+  warranty_notes TEXT NOT NULL DEFAULT '',  -- conditions staff must honour
   notes         TEXT NOT NULL DEFAULT '',
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now'))

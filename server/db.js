@@ -24,6 +24,10 @@ addColumn('devices', 'site_id', 'INTEGER REFERENCES sites(id) ON DELETE SET NULL
 addColumn('claims', 'site_id', 'INTEGER REFERENCES sites(id) ON DELETE SET NULL');
 addColumn('invoice_imports', 'site_id', 'INTEGER REFERENCES sites(id) ON DELETE SET NULL');
 addColumn('invoice_imports', 'reference', "TEXT NOT NULL DEFAULT ''");
+addColumn('manufacturers', 'cc_email', "TEXT NOT NULL DEFAULT ''");
+addColumn('manufacturers', 'aliases', "TEXT NOT NULL DEFAULT ''");
+addColumn('manufacturers', 'default_warranty_months', 'INTEGER');
+addColumn('manufacturers', 'warranty_notes', "TEXT NOT NULL DEFAULT ''");
 
 /**
  * Every customer needs at least one site, because equipment now hangs off a

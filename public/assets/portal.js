@@ -9,7 +9,7 @@
   const T = (k, v) => window.I18N.t(k, v);
   const TV = (kind, value) => window.I18N.tv(kind, value);
 
-  const state = { customer: null, devices: [], sites: [], summary: {}, claims: [], categories: [] };
+  const state = { customer: null, devices: [], sites: [], summary: {}, claims: [], categories: [], afterSalesEmail: '' };
 
   // --- Boot ----------------------------------------------------------------
 
@@ -32,6 +32,7 @@
     state.customer = data.customer;
     state.sites = data.sites || [];
     state.categories = data.categories || [];
+    state.afterSalesEmail = data.after_sales_email || '';
     $('#companyName').textContent = data.customer.company_name || data.customer.email;
     fillProfileForm();
   }
@@ -359,9 +360,35 @@
       el('div', { class: 'field' }, [el('label', { text: T('claim_media') }), picker.node]),
     ]);
 
+    // Out-of-warranty is said plainly, before the customer writes anything:
+    // they can use their own repairer, or ask us to coordinate one.
+    const oowNotice = el('div', { class: 'status', id: 'oow_notice' });
+
+    function refreshWarrantyNotice() {
+      const device = state.devices.find((d) => String(d.id) === String(deviceSelect.value));
+      const covered = device && device.warranty_status !== 'expired';
+      if (!device || covered) {
+        hideStatus(oowNotice);
+        submitBtn.textContent = T('claim_submit');
+        return;
+      }
+      clear(oowNotice);
+      oowNotice.className = 'status show';
+      oowNotice.appendChild(el('div', { style: 'font-weight:500;', text: T('oow_title') }));
+      oowNotice.appendChild(el('div', {
+        style: 'margin-top:3px;',
+        text: T('oow_body', {
+          date: fmtDate(device.warranty_end),
+          email: state.afterSalesEmail || 'Service@CHESonline.com.au',
+        }),
+      }));
+      submitBtn.textContent = T('oow_submit');
+    }
+
     // Picking a machine at another venue swaps in that venue's contact, so a
     // group with several sites never sends a technician to the wrong person.
     deviceSelect.addEventListener('change', () => {
+      refreshWarrantyNotice();
       const site = siteOf(deviceSelect.value);
       const name = $('#claim_contact_name', form);
       const phone = $('#claim_contact_phone', form);
@@ -372,10 +399,12 @@
     });
 
     const status = el('div', { class: 'status' });
+    form.appendChild(oowNotice);
     form.appendChild(status);
 
     const submitBtn = el('button', { class: 'btn', type: 'submit', form: 'claimForm', text: T('claim_submit') });
     const m = modal({ title: T('claim_new'), body: form, footer: [submitBtn] });
+    refreshWarrantyNotice();
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -417,7 +446,7 @@
           setStatus(status, 'fail', errorMessage(err));
         }
         submitBtn.disabled = false;
-        submitBtn.textContent = T('claim_submit');
+        refreshWarrantyNotice();
       }
     });
   }

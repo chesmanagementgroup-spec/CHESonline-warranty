@@ -22,55 +22,102 @@ function arg(name, fallback) {
 }
 const has = (name) => process.argv.includes('--' + name);
 
-// --- Staff account ---------------------------------------------------------
+// --- Staff accounts ---------------------------------------------------------
+// Everyone who works a request gets their own login, so the timeline records
+// who changed a status and who sent a job to a supplier.
 
-const email = String(arg('email', config.admin.email) || '').toLowerCase();
-const password = arg('password', config.admin.password);
-const name = arg('name', config.admin.name);
-
-if (email && password) {
-  const existing = db.prepare('SELECT * FROM staff_users WHERE lower(email) = lower(?)').get(email);
+function upsertStaff(staffName, staffEmail, staffPassword) {
+  const clean = String(staffEmail || '').trim().toLowerCase();
+  if (!clean || !staffPassword) return false;
+  const existing = db.prepare('SELECT * FROM staff_users WHERE lower(email) = lower(?)').get(clean);
   if (existing) {
     db.prepare('UPDATE staff_users SET password_hash = ?, name = ?, active = 1 WHERE id = ?')
-      .run(auth.hashPassword(password), name, existing.id);
-    console.log(`Updated staff account ${email}`);
+      .run(auth.hashPassword(staffPassword), staffName, existing.id);
+    console.log(`Updated staff account ${clean}`);
   } else {
     db.prepare('INSERT INTO staff_users (name, email, password_hash, role) VALUES (?, ?, ?, ?)')
-      .run(name, email, auth.hashPassword(password), 'admin');
-    console.log(`Created staff account ${email}`);
+      .run(staffName, clean, auth.hashPassword(staffPassword), 'admin');
+    console.log(`Created staff account ${clean}`);
   }
-} else {
-  console.log('No staff account created — pass --email and --password, or set ADMIN_EMAIL / ADMIN_PASSWORD in .env');
+  return true;
 }
 
-// --- Manufacturers ---------------------------------------------------------
-// Service addresses are left blank on purpose: fill each one in from the
-// supplier's current service contact before forwarding a job to them.
+const madeStaff = [
+  upsertStaff(
+    arg('name', config.admin.name),
+    arg('email', config.admin.email),
+    arg('password', config.admin.password)
+  ),
+  // A second account from the environment, so both people exist on first boot.
+  upsertStaff(
+    process.env.STAFF2_NAME || 'Cristina',
+    process.env.STAFF2_EMAIL || '',
+    process.env.STAFF2_PASSWORD || ''
+  ),
+].filter(Boolean).length;
 
-const MANUFACTURERS = [
-  ['SIMCO', '', '', 'Refrigeration and dishwashing. Confirm the current service lodgement route before sending.'],
-  ['Waldorf', '', '', 'Moffat brand — cooking equipment.'],
-  ['Turbofan', '', '', 'Moffat brand — convection ovens.'],
-  ['Blue Seal', '', '', ''],
-  ['Skope', '', '', 'Commercial refrigeration.'],
-  ['Williams', '', '', 'Commercial refrigeration.'],
-  ['Roband', '', '', ''],
-  ['Bromic', '', '', ''],
-  ['Robot Coupe', '', '', 'Food preparation.'],
-  ['Rational', '', '', 'Combi ovens.'],
-  ['Hoshizaki', '', '', 'Ice machines.'],
-  ['Winterhalter', '', '', 'Warewashing.'],
-];
+if (!madeStaff) {
+  console.log('No staff account created — pass --email and --password, or set '
+    + 'ADMIN_EMAIL / ADMIN_PASSWORD (and STAFF2_EMAIL / STAFF2_PASSWORD) in .env');
+}
+
+// --- Supplier service desks -------------------------------------------------
+// Seeded from server/lib/suppliers.js. Existing rows are filled in where a
+// field is still blank but never overwritten, so a correction made in the
+// console survives the next seed.
+
+const { SUPPLIERS } = require('../server/lib/suppliers');
 
 const insertManufacturer = db.prepare(`
-  INSERT INTO manufacturers (name, service_email, portal_url, notes) VALUES (?, ?, ?, ?)
+  INSERT INTO manufacturers (name, service_email, cc_email, portal_url, phone, aliases,
+                             default_warranty_months, warranty_notes, notes)
+  VALUES (@name, @service_email, @cc_email, @portal_url, @phone, @aliases,
+          @default_warranty_months, @warranty_notes, @notes)
 `);
+
 let added = 0;
-for (const [mName, mEmail, mPortal, mNotes] of MANUFACTURERS) {
-  const exists = db.prepare('SELECT id FROM manufacturers WHERE lower(name) = lower(?)').get(mName);
-  if (!exists) { insertManufacturer.run(mName, mEmail, mPortal, mNotes); added++; }
+let filled = 0;
+
+for (const supplier of SUPPLIERS) {
+  const row = {
+    name: supplier.name,
+    service_email: supplier.serviceEmail || '',
+    cc_email: supplier.ccEmail || '',
+    portal_url: supplier.portalUrl || '',
+    phone: supplier.phone || '',
+    aliases: (supplier.aliases || []).join(', '),
+    default_warranty_months: supplier.defaultWarrantyMonths || null,
+    warranty_notes: supplier.warrantyNotes || '',
+    notes: supplier.notes || '',
+  };
+
+  const existing = db.prepare('SELECT * FROM manufacturers WHERE lower(name) = lower(?)').get(supplier.name);
+  if (!existing) {
+    insertManufacturer.run(row);
+    added++;
+    continue;
+  }
+
+  const patch = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (key === 'name' || !value) continue;
+    const current = existing[key];
+    if (current === null || current === undefined || current === '') patch[key] = value;
+  }
+  if (Object.keys(patch).length) {
+    const sets = Object.keys(patch).map((k) => `${k} = @${k}`).join(', ');
+    db.prepare(`UPDATE manufacturers SET ${sets}, updated_at = datetime('now') WHERE id = @id`)
+      .run({ ...patch, id: existing.id });
+    filled++;
+  }
 }
-console.log(`Manufacturers: ${added} added, ${MANUFACTURERS.length - added} already present`);
+
+console.log(`Supplier desks: ${added} added, ${filled} updated where fields were blank, `
+  + `${SUPPLIERS.length - added - filled} already complete`);
+
+const noTerm = SUPPLIERS.filter((s) => !s.defaultWarrantyMonths).length;
+console.log(`  ${SUPPLIERS.length - noTerm} have a standard warranty term applied on import; `
+  + `${noTerm} vary by model and are left for the invoice or a person to set.`);
 
 // --- Demo data -------------------------------------------------------------
 

@@ -507,6 +507,7 @@
     const draft = await api.get(url);
 
     const to = el('input', { type: 'email', id: 'fwd_to', value: draft.to || '' });
+    const cc = el('input', { type: 'email', id: 'fwd_cc', value: draft.cc || '' });
     const subject = el('input', { type: 'text', id: 'fwd_subject', value: draft.subject });
     const bodyInput = el('textarea', { id: 'fwd_body', style: 'min-height:320px; font-family:ui-monospace,Menlo,monospace; font-size:12px;', text: draft.body });
     const notify = el('input', { type: 'checkbox', id: 'fwd_notify', checked: 'checked' });
@@ -520,10 +521,27 @@
           el('a', { href: draft.portal_url, target: '_blank', rel: 'noopener', text: draft.portal_url }),
         ])
         : null,
-      fieldRow('fwd_to', T('a_forward_to'), to, draft.to ? null : T('a_forward_noemail'), true),
+      draft.warranty_notes || draft.supplier_notes
+        ? el('div', { class: 'panel', style: 'margin-bottom:14px;' }, [
+          el('div', { style: 'font-weight:500; margin-bottom:5px;', text: T('a_forward_conditions') }),
+          draft.warranty_notes ? el('div', { style: 'font-size:13px; color:var(--text-2);', text: draft.warranty_notes }) : null,
+          draft.supplier_notes ? el('div', { style: 'font-size:13px; color:var(--text-2); margin-top:5px;', text: draft.supplier_notes }) : null,
+        ])
+        : null,
+      el('div', { class: 'row-2' }, [
+        fieldRow('fwd_to', T('a_forward_to'), to, draft.to ? null : T('a_forward_noemail'), true),
+        fieldRow('fwd_cc', T('a_forward_cc'), cc),
+      ]),
       fieldRow('fwd_subject', T('a_forward_subject'), subject),
       fieldRow('fwd_body', T('a_forward_body'), bodyInput),
       el('div', { class: 'check-row' }, [notify, el('span', { text: T('a_notify_customer') })]),
+      (draft.checklist || []).length
+        ? el('details', { style: 'margin-top:14px;' }, [
+          el('summary', { style: 'cursor:pointer; font-size:13px; color:var(--text-2);', text: T('a_forward_checklist') }),
+          el('ul', { style: 'margin:8px 0 0 18px; font-size:13px; color:var(--text-2);' },
+            draft.checklist.map((item) => el('li', { text: item, style: 'margin-bottom:3px;' }))),
+        ])
+        : null,
       status,
     ]);
 
@@ -535,6 +553,7 @@
       try {
         const res = await api.post('/api/admin/claims/' + claimId + '/forward', {
           to: to.value,
+          cc: cc.value,
           subject: subject.value,
           body: bodyInput.value,
           manufacturer_id: manufacturerId ? Number(manufacturerId) : null,
@@ -939,12 +958,13 @@
       return;
     }
     host.appendChild(table(
-      [T('a_tab_manufacturers'), T('a_forward_to'), T('a_forward_portal'), T('profile_phone'), T('a_stat_devices')],
+      [T('a_tab_manufacturers'), T('a_forward_to'), T('a_mfr_months'), T('a_mfr_aliases'), T('profile_phone'), T('a_stat_devices')],
       data.manufacturers.map((m) => ({
         cells: [
           { node: el('strong', { text: m.name }) },
           m.service_email || '—',
-          m.portal_url || '—',
+          m.default_warranty_months ? String(m.default_warranty_months) : 'by model',
+          (m.aliases || '—').slice(0, 60),
           m.phone || '—',
           { num: true, node: document.createTextNode(String(m.device_count)) },
         ],
@@ -957,6 +977,17 @@
     const form = el('form', { id: 'mfrForm', novalidate: 'novalidate' }, [
       fieldRow('mfr_name', T('a_tab_manufacturers'), el('input', { type: 'text', id: 'mfr_name', value: (existing && existing.name) || '' }), null, true),
       fieldRow('mfr_service_email', T('a_forward_to'), el('input', { type: 'email', id: 'mfr_service_email', value: (existing && existing.service_email) || '' })),
+      fieldRow('mfr_cc_email', T('a_mfr_cc'), el('input', { type: 'email', id: 'mfr_cc_email', value: (existing && existing.cc_email) || '' })),
+      fieldRow('mfr_aliases', T('a_mfr_aliases'), el('input', {
+        type: 'text', id: 'mfr_aliases', value: (existing && existing.aliases) || '',
+      }), T('a_mfr_aliases_hint')),
+      fieldRow('mfr_default_warranty_months', T('a_mfr_months'), el('input', {
+        type: 'number', id: 'mfr_default_warranty_months', min: '0', max: '240',
+        value: existing && existing.default_warranty_months ? String(existing.default_warranty_months) : '',
+      }), T('a_mfr_months_hint')),
+      fieldRow('mfr_warranty_notes', T('a_mfr_warranty_notes'), el('textarea', {
+        id: 'mfr_warranty_notes', style: 'min-height:70px;', text: (existing && existing.warranty_notes) || '',
+      })),
       fieldRow('mfr_portal_url', T('a_forward_portal'), el('input', { type: 'text', id: 'mfr_portal_url', value: (existing && existing.portal_url) || '' })),
       fieldRow('mfr_phone', T('profile_phone'), el('input', { type: 'text', id: 'mfr_phone', value: (existing && existing.phone) || '' })),
       fieldRow('mfr_notes', T('dev_notes'), el('textarea', { id: 'mfr_notes', style: 'min-height:70px;', text: (existing && existing.notes) || '' })),
@@ -973,6 +1004,10 @@
       const payload = {
         name: $('#mfr_name', form).value,
         service_email: $('#mfr_service_email', form).value,
+        cc_email: $('#mfr_cc_email', form).value,
+        aliases: $('#mfr_aliases', form).value,
+        default_warranty_months: $('#mfr_default_warranty_months', form).value,
+        warranty_notes: $('#mfr_warranty_notes', form).value,
         portal_url: $('#mfr_portal_url', form).value,
         phone: $('#mfr_phone', form).value,
         notes: $('#mfr_notes', form).value,

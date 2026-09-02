@@ -573,10 +573,16 @@ router.get('/claims/:id/forward', (req, res) => {
   const { msg, manufacturer } = buildForward(req, claim);
   res.json({
     to: (manufacturer && manufacturer.service_email) || '',
+    cc: (manufacturer && manufacturer.cc_email) || '',
     manufacturer,
     subject: msg.subject,
     body: msg.text,
     portal_url: (manufacturer && manufacturer.portal_url) || '',
+    // What this particular desk requires — a picking slip, prior
+    // authorisation, registration inside 90 days — shown before sending.
+    warranty_notes: (manufacturer && manufacturer.warranty_notes) || '',
+    supplier_notes: (manufacturer && manufacturer.notes) || '',
+    checklist: require('../lib/suppliers').CLAIM_CHECKLIST,
   });
 });
 
@@ -665,9 +671,15 @@ router.post('/manufacturers', (req, res) => {
   if (existing) return res.status(409).json({ error: 'validation', fields: { name: 'Already on the list' } });
 
   const info = db.prepare(`
-    INSERT INTO manufacturers (name, service_email, portal_url, phone, notes)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(v.str(b.name, 120), v.email(b.service_email), v.str(b.portal_url, 300), v.str(b.phone, 40), v.str(b.notes, 2000));
+    INSERT INTO manufacturers (name, service_email, cc_email, portal_url, phone, aliases,
+                               default_warranty_months, warranty_notes, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    v.str(b.name, 120), v.email(b.service_email), v.email(b.cc_email),
+    v.str(b.portal_url, 300), v.str(b.phone, 80), v.str(b.aliases, 500),
+    v.int(b.default_warranty_months, { min: 0, max: 240, fallback: null }),
+    v.str(b.warranty_notes, 2000), v.str(b.notes, 2000)
+  );
   res.status(201).json({ ok: true, manufacturer: db.prepare('SELECT * FROM manufacturers WHERE id = ?').get(info.lastInsertRowid) });
 });
 
@@ -680,13 +692,18 @@ router.put('/manufacturers/:id', (req, res) => {
     return res.status(400).json({ error: 'validation', fields: { service_email: 'Invalid email address' } });
   }
   db.prepare(`
-    UPDATE manufacturers SET name = ?, service_email = ?, portal_url = ?, phone = ?, notes = ?,
+    UPDATE manufacturers SET name = ?, service_email = ?, cc_email = ?, portal_url = ?, phone = ?,
+      aliases = ?, default_warranty_months = ?, warranty_notes = ?, notes = ?,
       updated_at = datetime('now') WHERE id = ?
   `).run(
     v.str(b.name, 120) || existing.name,
     v.email(b.service_email),
+    v.email(b.cc_email),
     v.str(b.portal_url, 300),
-    v.str(b.phone, 40),
+    v.str(b.phone, 80),
+    v.str(b.aliases, 500),
+    v.int(b.default_warranty_months, { min: 0, max: 240, fallback: null }),
+    v.str(b.warranty_notes, 2000),
     v.str(b.notes, 2000),
     id
   );

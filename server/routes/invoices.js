@@ -10,7 +10,7 @@ const asyncRoute = require('../lib/asyncRoute');
 const { documentUpload, attachmentPath } = require('../lib/uploads');
 const { parseInvoiceText, parseInvoiceCsv } = require('../lib/invoiceParser');
 const { toIsoDate } = require('../lib/dates');
-const { refreshWarranty, findOrCreateManufacturer, getDevice, decorateDevice,
+const { refreshWarranty, findOrCreateManufacturer, defaultWarrantyMonthsForBrand, getDevice, decorateDevice,
         listSites, getSite, createSite, defaultSite } = require('../lib/models');
 const { sendMail } = require('../mailer');
 const auth = require('../auth');
@@ -57,6 +57,14 @@ router.post('/upload', documentUpload.single('file'), asyncRoute(async (req, res
   } catch (err) {
     fs.rm(filePath, { force: true }, () => {});
     return res.status(400).json({ error: 'unreadable_file', message: err.message });
+  }
+
+  // Fill in the supplier's standard warranty where the invoice was silent, so
+  // the review table shows what will actually be applied.
+  for (const line of parsed.lines || []) {
+    if (!line.warranty_months && line.brand) {
+      line.warranty_months = defaultWarrantyMonthsForBrand(line.brand);
+    }
   }
 
   const suggested = guessCustomer(parsed.detected_customer)
@@ -206,7 +214,13 @@ router.post('/:id/commit', asyncRoute(async (req, res) => {
           serial_number: v.str(serials[unit], 120),
           purchase_date: invoiceDate,
           delivered_at: deliveryDate,
-          warranty_months: v.int(line.warranty_months, { min: 0, max: 240, fallback: config.defaultWarrantyMonths }),
+          // The invoice's own wording wins; then the supplier's standard term;
+          // only then the global fallback.
+          warranty_months: v.int(line.warranty_months, {
+            min: 0,
+            max: 240,
+            fallback: defaultWarrantyMonthsForBrand(brand) || config.defaultWarrantyMonths,
+          }),
           unit_price_ex_gst: v.money(line.unit_price_ex_gst),
           notes: quantity > 1 ? `Unit ${unit + 1} of ${quantity} on ${invoiceNumber || 'this invoice'}.` : '',
         });

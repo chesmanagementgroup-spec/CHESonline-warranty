@@ -190,10 +190,38 @@ function addClaimEvent(claimId, { actorType, actorLabel = '', type, message = ''
   `).run(claimId, actorType, actorLabel, type, message, visibleToCustomer ? 1 : 0);
 }
 
+/**
+ * Resolve the brand printed on a machine to the desk that services it. A
+ * Waldorf oven is serviced by Moffat, an Apuro fryer by Uropa; matching only
+ * on the supplier's own name would send those requests nowhere.
+ */
+function manufacturerForBrand(brand) {
+  const clean = String(brand || '').trim();
+  if (!clean) return null;
+
+  const exact = db.prepare('SELECT * FROM manufacturers WHERE lower(name) = lower(?)').get(clean);
+  if (exact) return exact;
+
+  const needle = clean.toLowerCase();
+  for (const m of db.prepare("SELECT * FROM manufacturers WHERE aliases != ''").all()) {
+    const aliases = m.aliases.split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+    if (aliases.includes(needle)) return m;
+  }
+  return null;
+}
+
+/** Cover to apply when the invoice itself does not state a period. */
+function defaultWarrantyMonthsForBrand(brand) {
+  const manufacturer = manufacturerForBrand(brand);
+  return manufacturer && manufacturer.default_warranty_months
+    ? manufacturer.default_warranty_months
+    : null;
+}
+
 function findOrCreateManufacturer(name) {
   const clean = String(name || '').trim();
   if (!clean) return null;
-  const existing = db.prepare('SELECT * FROM manufacturers WHERE lower(name) = lower(?)').get(clean);
+  const existing = manufacturerForBrand(clean);
   if (existing) return existing;
   const info = db.prepare('INSERT INTO manufacturers (name) VALUES (?)').run(clean);
   return db.prepare('SELECT * FROM manufacturers WHERE id = ?').get(info.lastInsertRowid);
@@ -208,6 +236,8 @@ function touch(table, id) {
 }
 
 module.exports = {
+  manufacturerForBrand,
+  defaultWarrantyMonthsForBrand,
   listSites,
   getSite,
   defaultSite,

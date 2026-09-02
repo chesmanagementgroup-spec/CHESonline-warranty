@@ -40,6 +40,7 @@ router.get('/profile', (req, res) => {
     customer: req.customer,
     sites: listSites(req.customer.id),
     categories: CLAIM_CATEGORIES,
+    after_sales_email: config.ches.afterSalesEmail,
   });
 });
 
