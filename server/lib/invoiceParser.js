@@ -81,23 +81,105 @@ function detectModelCode(desc) {
   return '';
 }
 
+/** Value of a field whose label sits on its own line, Xero's usual layout. */
+function valueAfterLabel(lines, labelRe, { within = 3 } = {}) {
+  for (let i = 0; i < lines.length; i++) {
+    if (!labelRe.test(lines[i])) continue;
+    const inline = lines[i].replace(labelRe, '').replace(/^[:\-\s]+/, '').trim();
+    if (inline) return inline;
+    for (let j = i + 1; j < Math.min(i + 1 + within, lines.length); j++) {
+      if (lines[j].trim()) return lines[j].trim();
+    }
+  }
+  return '';
+}
+
 function findInvoiceNumber(lines) {
-  const joined = lines.join('\n');
-  let m = joined.match(/Invoice\s*(?:Number|No\.?|#)\s*[:\-]?\s*(INV[-\s]?[\w-]+|[\w-]{3,})/i);
-  if (m) return m[1].replace(/\s+/g, '').toUpperCase();
-  m = joined.match(/\b(INV-\d{3,})\b/i);
-  return m ? m[1].toUpperCase() : '';
+  const labelled = valueAfterLabel(lines, /^invoice\s*(number|no\.?|#)\s*[:\-]?/i);
+  // "INV-24971 - SilverChef" carries a suffix; the number is the useful part.
+  const fromLabel = labelled.match(/\b(INV[-\s]?[A-Za-z0-9]+)/i);
+  if (fromLabel) return fromLabel[1].replace(/\s+/g, '').toUpperCase();
+  if (labelled && /^[\w-]{3,}$/.test(labelled)) return labelled.toUpperCase();
+
+  const anywhere = lines.join('\n').match(/\b(INV-\d{3,})\b/i);
+  return anywhere ? anywhere[1].toUpperCase() : '';
 }
 
 function findInvoiceDate(lines) {
-  const joined = lines.join('\n');
-  const m = joined.match(/Invoice\s*Date\s*[:\-]?\s*([0-9A-Za-z ,./-]{6,20})/i);
-  if (m) {
-    const iso = toIsoDate(m[1].trim());
-    if (iso) return iso;
+  const labelled = valueAfterLabel(lines, /^(invoice|issue)\s*date\s*[:\-]?/i);
+  const iso = toIsoDate(labelled);
+  if (iso) return iso;
+  const m = lines.join('\n').match(/\b(\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{4})\b/);
+  return m ? toIsoDate(m[1]) : null;
+}
+
+/** The quote or project this invoice came from, e.g. "QU-23602: ...". */
+function findReference(lines) {
+  const value = valueAfterLabel(lines, /^reference\s*[:\-]?/i);
+  if (value && !/^\$/.test(value)) return value;
+  const m = lines.join('\n').match(/\b(QU-\d{3,}[^\n]{0,60})/i);
+  return m ? m[1].trim() : '';
+}
+
+/**
+ * On a rent-try-buy invoice the bill-to is the finance company, not the venue
+ * that ends up with the machines. CHES writes the venue into the first line
+ * item as a "Customer details" block, so that block — when present — is who
+ * the equipment actually belongs to.
+ */
+function findCustomerDetails(lines) {
+  const start = lines.findIndex((l) => /^customer\s*details\s*:?\s*$/i.test(l));
+  if (start < 0) return null;
+
+  const details = { company_name: '', contact_name: '', phone: '', email: '', address: '' };
+  const addressParts = [];
+
+  for (let i = start + 1; i < Math.min(start + 14, lines.length); i++) {
+    const line = lines[i];
+    if (/^\$?[\d,]+\.\d{2}/.test(line)) break;         // reached the amounts
+
+    let m = line.match(/^(?:trading|business|venue|company)\s*name\s*[:\-]\s*(.+)$/i);
+    if (m) { details.company_name = m[1].trim(); continue; }
+
+    m = line.match(/^(?:applicant|contact|customer)\s*name\s*[:\-]\s*(.+)$/i);
+    if (m) { details.contact_name = m[1].trim(); continue; }
+
+    m = line.match(/^(?:phone|mobile|tel|telephone)\s*[:\-]\s*(.+)$/i);
+    if (m) { details.phone = m[1].trim(); continue; }
+
+    m = line.match(/^e-?mail\s*[:\-]\s*(.+)$/i);
+    if (m) { details.email = m[1].trim(); continue; }
+
+    // Anything left that is not a product code is part of the site address.
+    if (/[A-Za-z]{3}/.test(line) && !ITEM_CODE.test(line)) addressParts.push(line.trim());
+    else if (addressParts.length) break;
   }
-  const m2 = joined.match(/\b(\d{1,2}\s+[A-Za-z]{3,9}\.?\s+\d{4})\b/);
-  return m2 ? toIsoDate(m2[1]) : null;
+
+  details.address = addressParts.join(' ').replace(/\s+/g, ' ').trim();
+  Object.assign(details, splitAddress(details.address));
+  return details.company_name || details.email ? details : null;
+}
+
+/** "Shop G41, 22 Lemon Tree Avenue, Melrose Park, NSW, 2114" -> parts. */
+function splitAddress(address) {
+  const out = { address_line1: '', suburb: '', state: '', postcode: '' };
+  if (!address) return out;
+
+  const postcode = address.match(/\b(\d{4})\b\s*$/);
+  if (postcode) out.postcode = postcode[1];
+
+  const state = address.match(/\b(NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\b/i);
+  if (state) out.state = state[1].toUpperCase();
+
+  const parts = address.split(',').map((p) => p.trim()).filter(Boolean);
+  const stateIdx = parts.findIndex((p) => /^(NSW|VIC|QLD|SA|WA|TAS|NT|ACT)$/i.test(p));
+  if (stateIdx > 0) {
+    out.suburb = parts[stateIdx - 1];
+    out.address_line1 = parts.slice(0, stateIdx - 1).join(', ');
+  } else {
+    out.address_line1 = parts.slice(0, -1).join(', ') || address;
+  }
+  return out;
 }
 
 /**
@@ -151,7 +233,7 @@ const toNumber = (s) => {
  * quantity x unit price must equal the line total. That check is what makes
  * the run-together case unambiguous.
  */
-function parseLineItem(line) {
+function parseLineItem(line, { allowEmptyDescription = false } = {}) {
   MONEY_RE.lastIndex = 0;
   const money = [];
   let m;
@@ -193,7 +275,12 @@ function parseLineItem(line) {
       if (unitPrice === null || !close(quantity * unitPrice, amount)) continue;
 
       const description = prefix.slice(0, prefix.length - a).replace(/[\s.:-]+$/, '').trim();
-      if (!/[A-Za-z]{2}/.test(description)) continue;
+      if (!/[A-Za-z]{2}/.test(description)) {
+        // A row that is nothing but numbers belongs to the layout where the
+        // description sits in the lines above it; the caller supplies it.
+        if (allowEmptyDescription && !description) return { description: '', quantity, unitPrice, amount };
+        continue;
+      }
 
       return { description, quantity, unitPrice, amount };
     }
@@ -201,35 +288,188 @@ function parseLineItem(line) {
   return null;
 }
 
+// Lines inside a description block that are specification key/values, bullets
+// or serial numbers rather than the product name.
+const SPEC_LINE = new RegExp(
+  '^(?:more information|type|width|depth|height|weight|doors|burners?|burner output'
+  + '|gas type|gas consumption|capacity|dimensions|packaging|refrigeration|ambient'
+  + '|best suited|power|size|basket|cups?(?:/hr)?|coldwater|three-phase|voltage|amps?'
+  + '|chimney burners|duckbill burners)',
+  'i'
+);
+// Wrapped continuations of a warranty sentence, and parenthetical asides.
+const CONTINUATION_LINE = /^(\(|\d+\s*mm\b|years?\b|months?\b|mos\b|registration with|warrant|installation\)|conditions)/i;
+const BULLET_LINE = /^[•*–—-]\s?/;
+const SERIAL_LABEL = /^s\s*\/\s*n\s*[:.]?\s*/i;
+const SERIAL_VALUE = /^["']?[A-Za-z0-9][A-Za-z0-9\-\/]{4,}$/;
+const ITEM_CODE = /^[A-Z0-9][A-Z0-9\-.\/+]{2,}$/;
+const BOILERPLATE = /(invoice detail is for model reference|stock availability|qualified tradespeople|terms and conditions|please refer to the equipment specs|unpacking and positioning|delivery damages)/i;
+
+/** Warranty stated in the item's own text: "18 MONTHS", "2 years", "12mos". */
+function warrantyMonthsFrom(blockLines) {
+  for (const line of blockLines) {
+    if (!/warrant/i.test(line)) continue;
+    const m = line.match(/(\d{1,3})\s*(years?|yrs?|months?|mos?)\b/i);
+    if (!m) continue;
+    const n = parseInt(m[1], 10);
+    if (!Number.isFinite(n) || n <= 0) continue;
+    return /^(y|yr)/i.test(m[2]) ? n * 12 : n;
+  }
+  return null;
+}
+
+/**
+ * Serial numbers printed against the item. They appear either inline
+ * ("S/N: KBT-3081Y") or as a bare "S/N:" followed by one line per unit, which
+ * is how a quantity of two arrives with both machines' serials.
+ */
+function serialsFrom(blockLines) {
+  const serials = [];
+  for (let i = 0; i < blockLines.length; i++) {
+    if (!SERIAL_LABEL.test(blockLines[i])) continue;
+    const inline = blockLines[i].replace(SERIAL_LABEL, '').trim();
+    if (inline) {
+      serials.push(inline.replace(/^["']/, ''));
+      continue;
+    }
+    for (let j = i + 1; j < blockLines.length && SERIAL_VALUE.test(blockLines[j]); j++) {
+      serials.push(blockLines[j].replace(/^["']/, ''));
+      i = j;
+    }
+  }
+  return serials;
+}
+
+/**
+ * Turn the text above a numbers-only row into a product name and model code.
+ * These invoices lead with the supplier's item code on its own line, then the
+ * product name (often wrapped over two lines), then specifications.
+ */
+function describeBlock(blockLines) {
+  // A supplier's item code and a serial number are the same shape, so serials
+  // are recognised by position — the lines following an "S/N:" label — rather
+  // than by pattern, which would otherwise swallow the item code.
+  const usable = [];
+  let inSerials = false;
+  for (const line of blockLines) {
+    if (SERIAL_LABEL.test(line)) {
+      inSerials = !line.replace(SERIAL_LABEL, '').trim();
+      continue;
+    }
+    if (inSerials) {
+      if (SERIAL_VALUE.test(line)) continue;
+      inSerials = false;
+    }
+    if (SPEC_LINE.test(line) || BULLET_LINE.test(line) || CONTINUATION_LINE.test(line)
+        || /warrant/i.test(line)) {
+      continue;
+    }
+    usable.push(line);
+  }
+
+  let code = '';
+  let rest = usable;
+  if (usable.length && ITEM_CODE.test(usable[0]) && !/\s/.test(usable[0])) {
+    code = usable[0];
+    rest = usable.slice(1);
+  }
+
+  // The name can wrap; take consecutive lines until the text stops reading
+  // like a continuation of it.
+  const parts = [];
+  for (const line of rest) {
+    if (!/[A-Za-z]{2}/.test(line)) continue;
+    parts.push(line.trim());
+    if (parts.join(' ').length > 90) break;
+    if (!/[,\-+&/]$|\s$/.test(line) && parts.length >= 2) break;
+  }
+
+  let name = parts.join(' ').replace(/\s+/g, ' ').replace(/[\s\-:：]+$/, '').trim();
+  if (!name && code) name = code;
+  return { name, code };
+}
+
 /**
  * Parse the text of an invoice PDF into structured draft lines.
- * Everything is a best-effort guess — the admin UI always shows the result
- * for a human to correct before any device record is created.
+ *
+ * Two shapes are handled. In the flat shape every column sits on one line. In
+ * the shape Xero produces for a detailed invoice, each item is a block — item
+ * code, product name, specifications, serial numbers — closed by a row that is
+ * only quantity, price, tax and amount. Everything here is a best-effort read
+ * that the console shows for correction before any device record exists.
  */
 function parseInvoiceText(text) {
   const lines = toLines(text);
   const items = [];
+  let block = [];
+
+  let inCustomerDetails = false;
+  let detailLines = 0;
 
   for (const line of lines) {
-    if (TOTALS_LINE.test(line)) continue;
-    if (/^(description|item|qty|quantity|unit price|amount)\b/i.test(line)) continue;
+    if (TOTALS_LINE.test(line) || /^(item)?description(quantity|price)/i.test(line)
+        || /^(description|item|qty|quantity|unit price|amount)\b/i.test(line)) {
+      // A column header starts a fresh page; nothing above it describes an item.
+      block = [];
+      continue;
+    }
+    if (/^customer\s*details\s*:?\s*$/i.test(line)) { inCustomerDetails = true; detailLines = 0; continue; }
+    // The venue's details run for a few labelled lines; the next item code
+    // ends them, so the first machine is not swallowed by the block.
+    if (inCustomerDetails && (++detailLines > 10 || (ITEM_CODE.test(line) && !/\s/.test(line)))) {
+      inCustomerDetails = false;
+    }
 
-    const parsed = parseLineItem(line);
-    if (!parsed) continue;
-    if (TOTALS_LINE.test(parsed.description)) continue;
+    const flat = parseLineItem(line);
+    const row = flat || parseLineItem(line, { allowEmptyDescription: true });
 
-    items.push(buildLine({
-      description: parsed.description,
-      quantity: parsed.quantity,
-      unitPrice: parsed.unitPrice,
-      amount: parsed.amount,
-    }));
+    if (!row) {
+      if (!inCustomerDetails) block.push(line);
+      if (block.length > 60) block.shift();
+      continue;
+    }
+    inCustomerDetails = false;
+
+    let description = row.description;
+    let modelCode = '';
+    let serials = [];
+    let months = null;
+
+    if (!description) {
+      const described = describeBlock(block);
+      description = described.name;
+      modelCode = described.code;
+      serials = serialsFrom(block);
+      months = warrantyMonthsFrom(block);
+    }
+    block = [];
+
+    if (!description || TOTALS_LINE.test(description)) continue;
+
+    const item = buildLine({
+      description,
+      quantity: row.quantity,
+      unitPrice: row.unitPrice,
+      amount: row.amount,
+      model_code: modelCode,
+      warranty_months: months,
+    });
+    if (serials.length) item.serial_numbers = serials;
+    // Long zero-value text is the invoice's own terms, not a machine.
+    if (BOILERPLATE.test(description) || (!row.amount && description.length > 60)) {
+      item.is_equipment = false;
+      item.include = false;
+    }
+    items.push(item);
   }
 
+  const details = findCustomerDetails(lines);
   return {
     invoice_number: findInvoiceNumber(lines),
     invoice_date: findInvoiceDate(lines),
-    detected_customer: findCustomer(lines),
+    reference: findReference(lines),
+    detected_customer: (details && details.company_name) || findCustomer(lines),
+    customer_details: details,
     lines: items,
   };
 }
@@ -346,6 +586,9 @@ function parseInvoiceCsv(text) {
 module.exports = {
   parseInvoiceText,
   parseLineItem,
+  findCustomerDetails,
+  warrantyMonthsFrom,
+  serialsFrom,
   parseInvoiceCsv,
   parseCsv,
   detectBrand,

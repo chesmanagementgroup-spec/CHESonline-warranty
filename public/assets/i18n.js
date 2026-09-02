@@ -205,6 +205,12 @@
       a_search_ph: 'Search…',
       a_filter_all: 'All statuses',
       a_filter_open: 'Open only',
+      a_inv_pick: 'Select…',
+      a_inv_venue: 'Site details found on this invoice',
+      a_inv_venue_lead: 'The invoice is billed to one party but names the venue the equipment goes to. Create that venue as the customer so they can register the machines and lodge service requests.',
+      a_inv_venue_create: 'Create this customer',
+      a_inv_venue_matched: 'Already on file — selected above.',
+      a_inv_reference: 'Reference',
       a_forward_noemail: 'No service address on file for this manufacturer — type it in, then add it under Manufacturers so it is there next time.',
     },
 
@@ -402,6 +408,12 @@
       a_search_ph: '搜索…',
       a_filter_all: '全部状态',
       a_filter_open: '仅未结',
+      a_inv_pick: '请选择…',
+      a_inv_venue: '发票上识别到的现场信息',
+      a_inv_venue_lead: '这张发票的付款方和实际用设备的场地可能不是同一个。把场地建成客户，他们才能登记设备、提交报修。',
+      a_inv_venue_create: '建为客户',
+      a_inv_venue_matched: '已在系统里——上面已自动选好。',
+      a_inv_reference: '关联报价 / 项目',
       a_forward_noemail: '该厂家还没有存服务邮箱——先手动填写，之后到「厂家」里补上，下次就会自动带出。'
     },
   };

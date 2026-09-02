@@ -56,7 +56,10 @@ router.post('/upload', documentUpload.single('file'), async (req, res) => {
     return res.status(400).json({ error: 'unreadable_file', message: err.message });
   }
 
-  const suggested = guessCustomer(parsed.detected_customer);
+  const suggested = guessCustomer(parsed.detected_customer)
+    || (parsed.customer_details && parsed.customer_details.email
+      ? db.prepare('SELECT * FROM customers WHERE lower(email) = lower(?)').get(parsed.customer_details.email)
+      : null);
 
   const info = db.prepare(`
     INSERT INTO invoice_imports (original_name, stored_name, source, status, invoice_number, invoice_date,
@@ -83,6 +86,8 @@ router.post('/upload', documentUpload.single('file'), async (req, res) => {
     invoice_date: parsed.invoice_date || null,
     detected_customer: parsed.detected_customer || '',
     suggested_customer: suggested || null,
+    customer_details: parsed.customer_details || null,
+    reference: parsed.reference || '',
     lines: parsed.lines || [],
     line_count: (parsed.lines || []).length,
     warning: (parsed.lines || []).length ? null : 'no_lines_found',

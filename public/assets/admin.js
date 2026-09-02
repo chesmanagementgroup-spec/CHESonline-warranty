@@ -141,7 +141,7 @@
     clear(host);
 
     const customerSelect = el('select', { id: 'draft_customer_id' }, [
-      el('option', { value: '', disabled: 'disabled', selected: !draft.suggested_customer ? 'selected' : null, text: T('claim_device_ph') }),
+      el('option', { value: '', disabled: 'disabled', selected: !draft.suggested_customer ? 'selected' : null, text: T('a_inv_pick') }),
       ...state.customers.map((c) => el('option', {
         value: String(c.id),
         selected: draft.suggested_customer && draft.suggested_customer.id === c.id ? 'selected' : null,
@@ -159,6 +159,12 @@
         type: 'number', id: 'line_months_' + i, min: '0', max: '240', style: 'width:80px;',
         value: String(line.warranty_months || state.meta.default_warranty_months),
       });
+      // Serials often appear on the invoice; one per machine, in order.
+      const serials = el('input', {
+        type: 'text', id: 'line_serials_' + i, style: 'min-width:170px;',
+        value: (line.serial_numbers || []).join(', '),
+        placeholder: line.quantity > 1 ? 'one per machine, comma separated' : '',
+      });
       return {
         cells: [
           { node: include },
@@ -166,15 +172,68 @@
           { node: qty },
           { node: brand },
           { node: model },
+          { node: serials },
           { node: months },
           fmtMoney(line.unit_price_ex_gst),
         ],
       };
     });
 
+    // A rent-try-buy invoice is billed to the finance company, but the venue
+    // named on it is who actually ends up with the machines.
+    const venue = draft.customer_details;
+    let venuePanel = null;
+    if (venue && (venue.company_name || venue.email)) {
+      const matched = draft.suggested_customer;
+      const createBtn = el('button', { class: 'btn btn-sm', type: 'button', text: T('a_inv_venue_create') });
+      venuePanel = el('div', { class: 'section', style: 'margin-bottom:12px;' }, [
+        el('div', { class: 'section-header' }, [
+          el('div', { class: 'section-num', text: '@' }),
+          el('div', { class: 'section-title', text: T('a_inv_venue') }),
+        ]),
+        el('div', { class: 'section-body' }, [
+          el('p', { class: 'section-note', text: T('a_inv_venue_lead') }),
+          el('dl', { class: 'dl' }, [
+            el('dt', { text: T('profile_company') }), el('dd', { text: venue.company_name || '—' }),
+            el('dt', { text: T('profile_contact') }), el('dd', { text: venue.contact_name || '—' }),
+            el('dt', { text: T('profile_phone') }), el('dd', { text: venue.phone || '—' }),
+            el('dt', { text: T('profile_email') }), el('dd', { text: venue.email || '—' }),
+            el('dt', { text: T('profile_address') }), el('dd', { text: venue.address || '—' }),
+            draft.reference ? el('dt', { text: T('a_inv_reference') }) : null,
+            draft.reference ? el('dd', { text: draft.reference }) : null,
+          ]),
+          matched
+            ? el('div', { class: 'status show ok', text: T('a_inv_venue_matched') })
+            : el('div', { class: 'btn-row', style: 'margin-top:14px;' }, [createBtn]),
+        ]),
+      ]);
+
+      createBtn.addEventListener('click', () => {
+        openNewCustomer({
+          company_name: venue.company_name,
+          contact_name: venue.contact_name,
+          email: venue.email,
+          phone: venue.phone,
+          address_line1: venue.address_line1 || venue.address,
+          suburb: venue.suburb,
+          state: venue.state,
+          postcode: venue.postcode,
+          site_contact_name: venue.contact_name,
+          site_contact_phone: venue.phone,
+          site_contact_email: venue.email,
+        }, (created) => {
+          customerSelect.appendChild(el('option', { value: String(created.id), text: `${created.company_name} — ${created.email}` }));
+          customerSelect.value = String(created.id);
+          createBtn.replaceWith(el('span', { class: 'badge badge-ok', text: T('a_inv_venue_matched') }));
+        });
+      });
+    }
+
     const sendInvite = el('input', { type: 'checkbox', id: 'draft_invite', checked: 'checked' });
     const commitBtn = el('button', { class: 'btn', type: 'button', text: T('a_inv_commit') });
     const status = el('div', { class: 'status' });
+
+    if (venuePanel) host.appendChild(venuePanel);
 
     host.appendChild(el('div', { class: 'section' }, [
       el('div', { class: 'section-header' }, [
@@ -197,7 +256,7 @@
         ]),
         rows.length
           ? table(
-            [T('a_inv_include'), T('a_inv_desc'), T('a_inv_qty'), T('a_inv_brand'), T('a_inv_model'), T('a_inv_warranty'), T('a_inv_price')],
+            [T('a_inv_include'), T('a_inv_desc'), T('a_inv_qty'), T('a_inv_brand'), T('a_inv_model'), T('dev_serial'), T('a_inv_warranty'), T('a_inv_price')],
             rows
           )
           : el('div', { class: 'empty', text: T('a_inv_nolines') }),
@@ -222,6 +281,7 @@
         quantity: Number($('#line_qty_' + i).value) || 1,
         brand: $('#line_brand_' + i).value,
         model_code: $('#line_model_' + i).value,
+        serial_numbers: $('#line_serials_' + i).value.split(',').map((x) => x.trim()).filter(Boolean),
         warranty_months: Number($('#line_months_' + i).value),
       }));
 
@@ -530,8 +590,8 @@
     return payload;
   }
 
-  function openNewCustomer() {
-    const form = customerForm(null);
+  function openNewCustomer(prefill, onCreated) {
+    const form = customerForm(prefill || null);
     const status = el('div', { class: 'status' });
     form.appendChild(status);
     const saveBtn = el('button', { class: 'btn', type: 'button', text: T('save') });
@@ -541,9 +601,10 @@
       clearFieldErrors(form);
       saveBtn.disabled = true;
       try {
-        await api.post('/api/admin/customers', readCustomerForm(form));
+        const res = await api.post('/api/admin/customers', readCustomerForm(form));
         m.close();
         await Promise.all([renderCustomers(), loadStats()]);
+        if (onCreated) onCreated(res.customer);
       } catch (err) {
         if (!err.fields || !showFieldErrors(err.fields)) setStatus(status, 'fail', errorMessage(err));
         saveBtn.disabled = false;
@@ -662,7 +723,7 @@
     const form = el('form', { id: 'deviceForm', novalidate: 'novalidate' });
 
     const customerSelect = el('select', { id: 'device_customer_id' }, [
-      el('option', { value: '', disabled: 'disabled', selected: existing ? null : 'selected', text: T('claim_device_ph') }),
+      el('option', { value: '', disabled: 'disabled', selected: existing ? null : 'selected', text: T('a_inv_pick') }),
       ...state.customers.map((c) => el('option', {
         value: String(c.id),
         selected: existing && existing.customer_id === c.id ? 'selected' : null,
@@ -917,7 +978,7 @@
   $('#claimFilter').addEventListener('change', loadClaims);
   $('#customerSearch').addEventListener('input', () => debounce(renderCustomers));
   $('#deviceSearch').addEventListener('input', () => debounce(renderDevices));
-  $('#newCustomerBtn').addEventListener('click', openNewCustomer);
+  $('#newCustomerBtn').addEventListener('click', () => openNewCustomer());
   $('#newDeviceBtn').addEventListener('click', openNewDevice);
   $('#newManufacturerBtn').addEventListener('click', () => openManufacturer(null));
   $('#signOut').addEventListener('click', async () => {
