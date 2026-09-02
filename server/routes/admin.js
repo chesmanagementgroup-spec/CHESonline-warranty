@@ -51,6 +51,7 @@ router.get('/stats', (req, res) => {
     claims_open: one("SELECT COUNT(*) AS n FROM claims WHERE status NOT IN ('resolved','closed')"),
     claims_new: one("SELECT COUNT(*) AS n FROM claims WHERE status = 'submitted'"),
     claims_total: one('SELECT COUNT(*) AS n FROM claims'),
+    devices_awaiting_check: devices.filter((d) => d.awaiting_check).length,
     smtp_configured: require('../mailer').isSmtpConfigured(),
     expiring_soon: devices
       .filter((d) => d.warranty_status === 'expiring')
@@ -409,6 +410,18 @@ router.put('/devices/:id', (req, res) => {
   res.json({ ok: true, device: getDevice(id) });
 });
 
+/** Confirm equipment a customer added from their own invoice. */
+router.post('/devices/:id/verify', (req, res) => {
+  const id = v.int(req.params.id, { fallback: 0 });
+  const device = getDevice(id);
+  if (!device) return res.status(404).json({ error: 'not_found' });
+  db.prepare(`
+    UPDATE devices SET verified_at = datetime('now'), verified_by = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(actor(req), id);
+  res.json({ ok: true, device: getDevice(id) });
+});
+
 router.delete('/devices/:id', (req, res) => {
   const id = v.int(req.params.id, { fallback: 0 });
   const linked = db.prepare('SELECT COUNT(*) AS n FROM claims WHERE device_id = ?').get(id).n;
@@ -718,6 +731,7 @@ router.get('/emails', (req, res) => {
       SELECT id, to_addr, cc_addr, subject, template, status, error, related_type, related_id, created_at
       FROM email_log ORDER BY id DESC LIMIT 200
     `).all(),
+    devices_awaiting_check: devices.filter((d) => d.awaiting_check).length,
     smtp_configured: require('../mailer').isSmtpConfigured(),
   });
 });

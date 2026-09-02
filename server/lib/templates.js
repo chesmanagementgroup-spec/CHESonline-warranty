@@ -75,6 +75,11 @@ function newClaimToChes({ claim, customer, device, warranty, attachments }) {
         : warranty && warranty.days_remaining !== null
           ? `IN WARRANTY (${warranty.days_remaining} days remaining)`
           : 'Unknown — needs checking'],
+      ['Record added by', device.source === 'customer'
+        ? (device.verified_at
+          ? 'the customer, checked by CHES'
+          : 'THE CUSTOMER, NOT YET CHECKED — confirm cover before lodging with the manufacturer')
+        : 'CHES, from the supplier invoice'],
       ['Location on site', device.location_note],
     ])
     : block('Equipment', [['Note', 'Customer did not select a registered device — see description.']]);
@@ -208,6 +213,48 @@ function forwardToManufacturer({ claim, customer, device, manufacturer, warranty
   };
 }
 
+/**
+ * Told to CHES when a customer adds equipment from their own invoice. This is
+ * the customer's account of what they own — it needs checking before it is
+ * treated as cover CHES has given.
+ */
+function customerAddedEquipment({ customer, site, devices, invoiceNumber, fileName }) {
+  return {
+    subject: `Equipment added by ${customer.company_name}${invoiceNumber ? ` — ${invoiceNumber}` : ''} — needs checking`,
+    text: joinBlocks([
+      'EQUIPMENT ADDED BY A CUSTOMER',
+      RULE,
+      block('Customer', [
+        ['Business', customer.company_name],
+        ['Contact', customer.contact_name],
+        ['Email', customer.email],
+        ['Phone', customer.phone],
+        ['Site', site && site.name],
+        ['Site address', site ? addressOf({
+          address_line1: site.address_line1, address_line2: site.address_line2,
+          suburb: site.suburb, state: site.state, postcode: site.postcode, country: site.country,
+        }) : ''],
+      ]),
+      block('Invoice they uploaded', [
+        ['Invoice number', invoiceNumber],
+        ['File', fileName],
+        ['Machines added', devices.length],
+      ]),
+      ['MACHINES', ...devices.map((d) => `  ${d.asset_tag}  ${d.product_name}`
+        + `${d.serial_number ? `  S/N ${d.serial_number}` : ''}`
+        + `${d.warranty_end ? `  (cover to ${d.warranty_end} if confirmed)` : ''}`)].join('\n'),
+      'These machines are on the customer\'s account now and they can report a\n'
+      + 'fault against them, but every one is flagged AWAITING CHECK until someone\n'
+      + 'here confirms it. The warranty dates above are worked from the invoice\n'
+      + 'they supplied and the supplier\'s standard term — they are not cover CHES\n'
+      + 'has agreed to until you say so.',
+      `Check them in the console:  ${config.baseUrl}/admin#devices`,
+      RULE,
+      `CHES Online · ${config.ches.serviceEmail}`,
+    ]),
+  };
+}
+
 /** Status change notification to the customer. */
 function claimStatusUpdate({ claim, customer, device, statusLabel, note, portalUrl }) {
   return {
@@ -275,6 +322,7 @@ module.exports = {
   forwardToManufacturer,
   claimStatusUpdate,
   equipmentHandover,
+  customerAddedEquipment,
   signInBlock,
   addressOf,
 };

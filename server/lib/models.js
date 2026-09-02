@@ -61,6 +61,9 @@ function decorateDevice(device) {
     warranty_status: w.status,
     warranty_days_remaining: w.days_remaining,
     site_name: device.site_name || null,
+    // A machine the customer added from their own invoice: usable, but not
+    // yet an authority on what CHES covers.
+    awaiting_check: device.source === 'customer' && !device.verified_at,
   };
 }
 

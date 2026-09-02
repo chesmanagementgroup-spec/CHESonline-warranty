@@ -65,9 +65,14 @@ CREATE TABLE IF NOT EXISTS devices (
   warranty_end     TEXT,
   location_note    TEXT    NOT NULL DEFAULT '', -- "kitchen line, under the pass"
   unit_price_ex_gst REAL,
-  status           TEXT    NOT NULL DEFAULT 'pending_registration',
-                            -- pending_registration | registered | decommissioned
+  status           TEXT    NOT NULL DEFAULT 'active',   -- active | decommissioned
   registered_at    TEXT,
+  -- Who put this machine on the account. Equipment a customer added from
+  -- their own invoice is usable immediately but is not an authority on what
+  -- CHES covers until someone here has checked it.
+  source           TEXT    NOT NULL DEFAULT 'ches',    -- ches | customer
+  verified_at      TEXT,
+  verified_by      TEXT    NOT NULL DEFAULT '',
   notes            TEXT    NOT NULL DEFAULT '',
   created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT    NOT NULL DEFAULT (datetime('now'))
@@ -189,6 +194,7 @@ CREATE TABLE IF NOT EXISTS invoice_imports (
   parsed_json    TEXT    NOT NULL DEFAULT '[]',
   devices_created INTEGER NOT NULL DEFAULT 0,
   created_by     TEXT    NOT NULL DEFAULT '',
+  submitted_by   TEXT    NOT NULL DEFAULT 'staff',    -- staff | customer
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   committed_at   TEXT
 );

@@ -7,7 +7,7 @@ Two front doors onto one database:
 
 | | Who | What they do |
 |---|---|---|
-| `/` → `/portal` | The customer | See their equipment grouped by venue with its warranty status, keep each venue's address and on-site after-sales contact current, and report a fault by picking the machine off their own list |
+| `/` → `/portal` | The customer | See their equipment grouped by venue with its warranty status, add equipment by uploading their own invoice, keep each venue's address and on-site after-sales contact current, and report a fault by picking the machine off their own list |
 | `/admin` | CHES staff | Upload a Xero **INVOICE** and turn it into tracked equipment records, maintain customer and equipment details, and forward a service request on to the manufacturer |
 
 Every service request lands in the CHES inbox as a system email the moment it
@@ -200,6 +200,19 @@ Two things follow from that list:
 Before a job is sent, the forward screen shows that desk's own conditions —
 SIMCO's picking slip, Stoddart's prior authorisation, Meiko's 90-day
 registration, Williams' remote units being 12 months parts-only.
+
+**Equipment a customer adds themselves.** A customer can upload their own
+invoice and put the machines on their account. What they add is usable
+immediately — it appears in their list and they can report a fault against it —
+but every machine is marked `source = customer` and flagged **awaiting check**
+until someone at CHES confirms it (*Equipment → open the machine → confirm*).
+
+That flag is the point. Warranty on a customer-supplied invoice is a claim made
+by a document CHES did not issue, so it is never allowed to become an authority
+on what CHES covers: the customer does not choose the warranty term (it comes
+from the supplier's standard cover), CHES is emailed the moment equipment is
+added, and the system email for any fault on unchecked equipment says so in
+capitals, above the fold, before anyone forwards it to a manufacturer.
 
 **Out of warranty.** When a customer picks a machine whose cover has ended, the
 form says so before they write anything: they may arrange their own repairer,

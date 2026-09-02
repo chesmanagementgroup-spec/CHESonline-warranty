@@ -2,12 +2,14 @@
 
 const express = require('express');
 const config = require('../config');
-const { db, nextClaimReference } = require('../db');
+const { db, nextClaimReference, nextAssetTag } = require('../db');
 const auth = require('../auth');
 const { requireCustomer } = require('../auth');
 const v = require('../lib/validate');
 const asyncRoute = require('../lib/asyncRoute');
-const { mediaUpload, recordAttachments } = require('../lib/uploads');
+const { mediaUpload, documentUpload, recordAttachments, attachmentPath } = require('../lib/uploads');
+const fs = require('fs');
+const { db: _db } = require('../db');
 const { sendMail } = require('../mailer');
 const templates = require('../lib/templates');
 const {
@@ -25,6 +27,7 @@ const {
   attachmentsFor,
   refreshWarranty,
   findOrCreateManufacturer,
+  defaultWarrantyMonthsForBrand,
   touch,
   toIsoDate,
 } = require('../lib/models');
@@ -173,6 +176,169 @@ router.put('/devices/:id', (req, res) => {
     .run(v.str(req.body && req.body.location_note, 200), device.id);
   res.json({ ok: true, device: getDevice(device.id) });
 });
+
+// --- Adding equipment from the customer's own invoice ----------------------
+
+/**
+ * A customer can put equipment on their own account by uploading the invoice
+ * it came on. What they add is usable straight away — it appears in their
+ * list and they can report a fault against it — but it is marked as awaiting
+ * a check by CHES and never silently becomes an authority on what CHES
+ * covers. Warranty is a claim made by a document a customer supplied, and it
+ * is treated as one until someone here has looked at it.
+ */
+router.post('/invoices/upload', documentUpload.single('file'), asyncRoute(async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'no_file' });
+
+  const filePath = attachmentPath(req.file.filename);
+  const isCsv = /csv|excel|text\/plain/i.test(req.file.mimetype) || /\.csv$/i.test(req.file.originalname);
+
+  let parsed;
+  let rawText = '';
+  try {
+    if (isCsv) {
+      rawText = fs.readFileSync(filePath, 'utf8');
+      parsed = require('../lib/invoiceParser').parseInvoiceCsv(rawText);
+    } else {
+      const data = await require('pdf-parse')(fs.readFileSync(filePath));
+      rawText = data.text || '';
+      parsed = require('../lib/invoiceParser').parseInvoiceText(rawText);
+    }
+  } catch (err) {
+    fs.rm(filePath, { force: true }, () => {});
+    return res.status(400).json({ error: 'unreadable_file', message: err.message });
+  }
+
+  const invoiceNumber = (parsed.invoice_number || '').toUpperCase();
+  const alreadyHere = invoiceNumber
+    ? db.prepare('SELECT COUNT(*) AS n FROM devices WHERE customer_id = ? AND invoice_number = ?')
+      .get(req.customer.id, invoiceNumber).n
+    : 0;
+
+  const info = db.prepare(`
+    INSERT INTO invoice_imports (original_name, stored_name, source, status, invoice_number, invoice_date,
+                                 customer_id, detected_customer, raw_text, parsed_json, created_by, submitted_by)
+    VALUES (@original_name, @stored_name, @source, 'draft', @invoice_number, @invoice_date,
+            @customer_id, @detected_customer, @raw_text, @parsed_json, @created_by, 'customer')
+  `).run({
+    original_name: req.file.originalname,
+    stored_name: req.file.filename,
+    source: isCsv ? 'csv' : 'pdf',
+    invoice_number: invoiceNumber,
+    invoice_date: parsed.delivery_date || parsed.invoice_date || null,
+    customer_id: req.customer.id,
+    detected_customer: parsed.detected_customer || '',
+    raw_text: rawText.slice(0, 200000),
+    parsed_json: JSON.stringify(parsed.lines || []),
+    created_by: `customer:${req.customer.email}`,
+  });
+
+  res.status(201).json({
+    ok: true,
+    import_id: info.lastInsertRowid,
+    invoice_number: invoiceNumber,
+    invoice_date: parsed.invoice_date || null,
+    delivery_date: parsed.delivery_date || null,
+    sites: listSites(req.customer.id),
+    lines: (parsed.lines || []).filter((l) => l.include !== false),
+    line_count: (parsed.lines || []).filter((l) => l.include !== false).length,
+    warning: (parsed.lines || []).length ? (alreadyHere ? 'invoice_already_on_account' : null) : 'no_lines_found',
+    already_on_account: alreadyHere,
+  });
+}));
+
+router.post('/invoices/:id/commit', asyncRoute(async (req, res) => {
+  const importId = v.int(req.params.id, { fallback: 0 });
+  const record = db.prepare('SELECT * FROM invoice_imports WHERE id = ? AND customer_id = ?')
+    .get(importId, req.customer.id);
+  if (!record) return res.status(404).json({ error: 'not_found' });
+  if (record.status === 'committed') return res.status(409).json({ error: 'already_committed' });
+
+  const b = req.body || {};
+  const lines = Array.isArray(b.lines) ? b.lines : JSON.parse(record.parsed_json || '[]');
+  const chosen = lines.filter((l) => l && l.include !== false && v.str(l.description));
+  if (!chosen.length) {
+    return res.status(400).json({ error: 'validation', fields: { lines: 'Tick at least one machine to add' } });
+  }
+
+  let site = v.int(b.site_id, { fallback: 0 }) ? getSite(v.int(b.site_id, { fallback: 0 })) : null;
+  if (!site || site.customer_id !== req.customer.id) site = defaultSite(req.customer.id);
+
+  const invoiceNumber = (v.str(b.invoice_number, 60) || record.invoice_number || '').toUpperCase();
+  const invoiceDate = toIsoDate(b.invoice_date) || record.invoice_date || null;
+  const deliveryDate = toIsoDate(b.delivery_date) || invoiceDate;
+
+  const insertDevice = db.prepare(`
+    INSERT INTO devices (customer_id, site_id, asset_tag, invoice_number, product_name, model_code, brand,
+                         manufacturer_id, serial_number, purchase_date, delivered_at, warranty_months,
+                         status, source, notes)
+    VALUES (@customer_id, @site_id, @asset_tag, @invoice_number, @product_name, @model_code, @brand,
+            @manufacturer_id, @serial_number, @purchase_date, @delivered_at, @warranty_months,
+            'active', 'customer', @notes)
+  `);
+
+  const createdIds = [];
+  db.transaction(() => {
+    for (const line of chosen) {
+      const quantity = v.int(line.quantity, { min: 1, max: 100, fallback: 1 });
+      const brand = v.str(line.brand, 80);
+      const manufacturer = brand ? findOrCreateManufacturer(brand) : null;
+      const serials = Array.isArray(line.serial_numbers) ? line.serial_numbers : [];
+
+      for (let unit = 0; unit < quantity; unit++) {
+        const info = insertDevice.run({
+          customer_id: req.customer.id,
+          site_id: site ? site.id : null,
+          asset_tag: nextAssetTag(),
+          invoice_number: invoiceNumber,
+          product_name: v.str(line.description, 200),
+          model_code: v.str(line.model_code, 80),
+          brand,
+          manufacturer_id: manufacturer ? manufacturer.id : null,
+          serial_number: v.str(serials[unit], 120),
+          purchase_date: invoiceDate,
+          delivered_at: deliveryDate,
+          // The customer does not set the warranty term: it comes from the
+          // supplier's standard cover, and CHES confirms it.
+          warranty_months: defaultWarrantyMonthsForBrand(brand) || config.defaultWarrantyMonths,
+          notes: `Added by the customer from ${invoiceNumber || 'their own invoice'}.`,
+        });
+        createdIds.push(info.lastInsertRowid);
+      }
+    }
+
+    db.prepare(`
+      UPDATE invoice_imports SET status = 'committed', site_id = ?, invoice_number = ?, invoice_date = ?,
+        parsed_json = ?, devices_created = ?, committed_at = datetime('now')
+      WHERE id = ?
+    `).run(site ? site.id : null, invoiceNumber, invoiceDate,
+      JSON.stringify(lines), createdIds.length, importId);
+  })();
+
+  for (const id of createdIds) refreshWarranty(id);
+  const devices = createdIds.map(getDevice);
+
+  // CHES is told, because until someone checks it this is the customer's
+  // account of what they own, not ours.
+  const msg = templates.customerAddedEquipment({
+    customer: req.customer,
+    site,
+    devices,
+    invoiceNumber,
+    fileName: record.original_name,
+  });
+  await sendMail({
+    to: config.ches.serviceEmail,
+    replyTo: req.customer.email,
+    subject: msg.subject,
+    text: msg.text,
+    template: 'customer_added_equipment',
+    relatedType: 'customer',
+    relatedId: req.customer.id,
+  });
+
+  res.status(201).json({ ok: true, devices_created: createdIds.length, devices });
+}));
 
 // --- Service requests ------------------------------------------------------
 

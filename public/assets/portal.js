@@ -134,7 +134,10 @@
           el('div', { class: 'card-meta', text: deviceSubtitle(d) }),
           el('div', { class: 'card-meta', text: warrantyLine(d) }),
         ]),
-        warrantyBadge(d),
+        el('div', { style: 'display:flex; flex-direction:column; gap:4px; align-items:flex-end;' }, [
+          warrantyBadge(d),
+          d.awaiting_check ? el('span', { class: 'badge badge-warn', text: T('dev_awaiting_check') }) : null,
+        ]),
       ]),
     ]);
   }
@@ -155,6 +158,9 @@
     const d = data.device;
 
     const form = el('form', { id: 'deviceForm', novalidate: 'novalidate' }, [
+      d.awaiting_check
+        ? el('div', { class: 'status show info', style: 'margin-top:0; margin-bottom:16px;', text: T('dev_awaiting_check_note') })
+        : null,
       el('dl', { class: 'dl', style: 'margin-bottom:18px;' }, [
         el('dt', { text: T('dev_warranty') }), el('dd', {}, [
           warrantyBadge(d), el('span', { text: '  ' + warrantyLine(d) }),
@@ -213,6 +219,162 @@
       input,
       hint ? el('div', { class: 'hint', text: hint }) : null,
     ]);
+  }
+
+  // --- Adding equipment from your own invoice --------------------------------
+
+  /**
+   * Upload an invoice, check what was read off it, and add those machines.
+   * Serial numbers are entered per machine here for the same reason they are
+   * in the console: two of the same model are two machines.
+   */
+  function openInvoiceUpload() {
+    const status = el('div', { class: 'status' });
+    const draftHost = el('div');
+
+    const fileInput = el('input', { type: 'file', accept: '.pdf,.csv,application/pdf,text/csv' });
+    const zone = el('div', { class: 'upload-zone' }, [
+      fileInput,
+      el('div', { class: 'upload-label', text: T('add_inv_drop') }),
+      el('div', { class: 'upload-hint', text: T('add_inv_hint') }),
+    ]);
+
+    const body = el('div', {}, [
+      el('p', { class: 'section-note', text: T('add_inv_lead') }),
+      zone,
+      status,
+      draftHost,
+    ]);
+
+    const m = modal({ title: T('add_inv'), body, wide: true });
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      clear(draftHost);
+      setStatus(status, 'info', T('add_inv_reading'));
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const draft = await api.upload('/api/portal/invoices/upload', fd);
+        if (!draft.lines.length) {
+          setStatus(status, 'fail', T('add_inv_none'));
+          return;
+        }
+        if (draft.warning === 'invoice_already_on_account') setStatus(status, 'info', T('add_inv_dupe'));
+        else hideStatus(status);
+        renderDraft(draft);
+      } catch (err) {
+        setStatus(status, 'fail', errorMessage(err));
+      } finally {
+        fileInput.value = '';
+      }
+    });
+
+    function renderDraft(draft) {
+      clear(draftHost);
+
+      const siteSelect = el('select', { id: 'add_site_id' }, (draft.sites || [])
+        .map((st) => el('option', { value: String(st.id), text: st.name })));
+
+      const list = el('div');
+      draft.lines.forEach((line, i) => {
+        const qty = el('input', {
+          type: 'number', id: 'add_qty_' + i, min: '1', max: '100',
+          value: String(line.quantity), style: 'width:64px;',
+        });
+        const name = el('input', { type: 'text', id: 'add_desc_' + i, value: line.description });
+        const units = el('div', { id: 'add_units_' + i, style: 'display:grid; gap:5px; margin-top:6px;' });
+
+        function renderUnits() {
+          const count = Math.max(1, Math.min(100, Number(qty.value) || 1));
+          const kept = Array.from(units.querySelectorAll('input')).map((n) => n.value);
+          const fromInvoice = line.serial_numbers || [];
+          clear(units);
+          for (let u = 0; u < count; u++) {
+            units.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+              el('span', {
+                style: 'font-size:12px; color:var(--text-2); min-width:92px;',
+                text: T('a_inv_unit', { n: u + 1, total: count }),
+              }),
+              el('input', {
+                type: 'text', id: `add_serial_${i}_${u}`,
+                value: kept[u] !== undefined ? kept[u] : (fromInvoice[u] || ''),
+                placeholder: T('dev_serial'),
+                style: 'flex:1;',
+              }),
+            ]));
+          }
+        }
+        renderUnits();
+        qty.addEventListener('input', renderUnits);
+
+        list.appendChild(el('div', { class: 'panel', style: 'margin-bottom:10px;' }, [
+          el('div', { style: 'display:flex; gap:10px; align-items:flex-end;' }, [
+            el('div', { style: 'flex:1;' }, [el('label', { text: T('dev_product') }), name]),
+            el('div', {}, [el('label', { text: T('a_inv_qty') }), qty]),
+          ]),
+          units,
+        ]));
+      });
+
+      draftHost.appendChild(el('div', { class: 'section', style: 'margin-top:20px;' }, [
+        el('div', { class: 'section-header' }, [
+          el('div', { class: 'section-title', text: T('add_inv_found') }),
+        ]),
+        el('div', { class: 'row-2' }, [
+          field('add_site_id', T('add_inv_site'), siteSelect),
+          field('add_invoice_number', T('dev_invoice'), el('input', {
+            type: 'text', id: 'add_invoice_number', value: draft.invoice_number || '',
+          })),
+        ]),
+        list,
+        el('div', { class: 'hint', text: T('add_inv_serial_hint') }),
+      ]));
+
+      const confirm = el('button', { class: 'btn', type: 'button', text: T('add_inv_confirm') });
+      draftHost.appendChild(el('div', { class: 'btn-row', style: 'margin-top:14px;' }, [confirm]));
+
+      confirm.addEventListener('click', async () => {
+        confirm.disabled = true;
+        const lines = draft.lines.map((line, i) => {
+          const quantity = Number($('#add_qty_' + i, draftHost).value) || 1;
+          const serials = [];
+          for (let u = 0; u < quantity; u++) {
+            const box = $(`#add_serial_${i}_${u}`, draftHost);
+            serials.push(box ? box.value.trim() : '');
+          }
+          return {
+            ...line,
+            include: true,
+            description: $('#add_desc_' + i, draftHost).value,
+            quantity,
+            serial_numbers: serials,
+          };
+        });
+
+        try {
+          const res = await api.post('/api/portal/invoices/' + draft.import_id + '/commit', {
+            site_id: Number(siteSelect.value) || null,
+            invoice_number: $('#add_invoice_number', draftHost).value,
+            invoice_date: draft.invoice_date,
+            delivery_date: draft.delivery_date,
+            lines,
+          });
+          m.close();
+          await Promise.all([loadDevices(), loadProfile()]);
+          render();
+          const done = modal({
+            title: T('add_inv'),
+            body: el('div', { class: 'status show ok', text: T('add_inv_done', { n: res.devices_created }) }),
+          });
+          setTimeout(() => done.close(), 8000);
+        } catch (err) {
+          setStatus(status, 'fail', errorMessage(err));
+          confirm.disabled = false;
+        }
+      });
+    }
   }
 
   // --- Service requests ----------------------------------------------------
@@ -580,6 +742,7 @@
 
   $$('.tab').forEach((t) => t.addEventListener('click', () => switchTab(t.dataset.tab)));
   $('#reportBtn').addEventListener('click', () => openClaimForm());
+  $('#addInvoiceBtn').addEventListener('click', openInvoiceUpload);
   $('#reportBtn2').addEventListener('click', () => openClaimForm());
   $('#signOut').addEventListener('click', async () => {
     await api.post('/api/auth/logout', {}).catch(() => {});

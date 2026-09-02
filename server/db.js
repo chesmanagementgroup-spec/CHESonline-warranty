@@ -28,6 +28,10 @@ addColumn('manufacturers', 'cc_email', "TEXT NOT NULL DEFAULT ''");
 addColumn('manufacturers', 'aliases', "TEXT NOT NULL DEFAULT ''");
 addColumn('manufacturers', 'default_warranty_months', 'INTEGER');
 addColumn('manufacturers', 'warranty_notes', "TEXT NOT NULL DEFAULT ''");
+addColumn('devices', 'source', "TEXT NOT NULL DEFAULT 'ches'");
+addColumn('devices', 'verified_at', 'TEXT');
+addColumn('devices', 'verified_by', "TEXT NOT NULL DEFAULT ''");
+addColumn('invoice_imports', 'submitted_by', "TEXT NOT NULL DEFAULT 'staff'");
 
 /**
  * Every customer needs at least one site, because equipment now hangs off a
