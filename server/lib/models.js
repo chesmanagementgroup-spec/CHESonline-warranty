@@ -36,7 +36,9 @@ const CLAIM_CATEGORIES = [
   'Other',
 ];
 
-const DEVICE_STATUSES = ['pending_registration', 'registered', 'decommissioned'];
+// A machine is live from the moment its invoice is imported; there is no
+// customer-side registration step.
+const DEVICE_STATUSES = ['active', 'decommissioned'];
 
 /** Recompute and persist warranty_start / warranty_end for one device. */
 function refreshWarranty(deviceId) {
@@ -58,29 +60,88 @@ function decorateDevice(device) {
     warranty_end: w.warranty_end,
     warranty_status: w.status,
     warranty_days_remaining: w.days_remaining,
-    needs_registration: device.status === 'pending_registration' || !device.delivered_at,
+    site_name: device.site_name || null,
   };
 }
 
 function getDevice(id) {
   return decorateDevice(db.prepare(`
     SELECT d.*, m.name AS manufacturer_name, m.service_email AS manufacturer_email,
-           c.company_name AS customer_name
+           c.company_name AS customer_name, s.name AS site_name
     FROM devices d
     LEFT JOIN manufacturers m ON m.id = d.manufacturer_id
     LEFT JOIN customers c ON c.id = d.customer_id
+    LEFT JOIN sites s ON s.id = d.site_id
     WHERE d.id = ?
   `).get(id));
 }
 
 function listDevicesForCustomer(customerId) {
   return db.prepare(`
-    SELECT d.*, m.name AS manufacturer_name
+    SELECT d.*, m.name AS manufacturer_name, s.name AS site_name
     FROM devices d
     LEFT JOIN manufacturers m ON m.id = d.manufacturer_id
+    LEFT JOIN sites s ON s.id = d.site_id
     WHERE d.customer_id = ?
-    ORDER BY d.status = 'registered', d.product_name COLLATE NOCASE, d.asset_tag
+    ORDER BY s.name COLLATE NOCASE, d.product_name COLLATE NOCASE, d.asset_tag
   `).all(customerId).map(decorateDevice);
+}
+
+// --- Sites ------------------------------------------------------------------
+
+function listSites(customerId) {
+  return db.prepare(`
+    SELECT s.*, (SELECT COUNT(*) FROM devices d WHERE d.site_id = s.id) AS device_count
+    FROM sites s WHERE s.customer_id = ? AND s.archived = 0
+    ORDER BY s.is_default DESC, s.name COLLATE NOCASE
+  `).all(customerId);
+}
+
+function getSite(id) {
+  return db.prepare('SELECT * FROM sites WHERE id = ?').get(id) || null;
+}
+
+/** The site a customer's equipment defaults to when only one exists. */
+function defaultSite(customerId) {
+  return db.prepare(`
+    SELECT * FROM sites WHERE customer_id = ? AND archived = 0
+    ORDER BY is_default DESC, id LIMIT 1
+  `).get(customerId) || null;
+}
+
+function siteAddress(site) {
+  if (!site) return '';
+  return [
+    site.address_line1,
+    site.address_line2,
+    [site.suburb, site.state, site.postcode].filter(Boolean).join(' '),
+  ].filter((p) => p && String(p).trim()).join(', ');
+}
+
+function createSite(customerId, fields) {
+  const existing = db.prepare('SELECT COUNT(*) AS n FROM sites WHERE customer_id = ?').get(customerId).n;
+  const info = db.prepare(`
+    INSERT INTO sites (customer_id, name, address_line1, address_line2, suburb, state, postcode,
+                       country, contact_name, contact_role, contact_phone, contact_email, notes, is_default)
+    VALUES (@customer_id, @name, @address_line1, @address_line2, @suburb, @state, @postcode,
+            @country, @contact_name, @contact_role, @contact_phone, @contact_email, @notes, @is_default)
+  `).run({
+    customer_id: customerId,
+    name: fields.name || 'Main site',
+    address_line1: fields.address_line1 || '',
+    address_line2: fields.address_line2 || '',
+    suburb: fields.suburb || '',
+    state: fields.state || '',
+    postcode: fields.postcode || '',
+    country: fields.country || 'Australia',
+    contact_name: fields.contact_name || '',
+    contact_role: fields.contact_role || '',
+    contact_phone: fields.contact_phone || '',
+    contact_email: fields.contact_email || '',
+    notes: fields.notes || '',
+    is_default: existing === 0 ? 1 : 0,
+  });
+  return getSite(info.lastInsertRowid);
 }
 
 function attachmentsFor({ claimId, deviceId }) {
@@ -147,6 +208,11 @@ function touch(table, id) {
 }
 
 module.exports = {
+  listSites,
+  getSite,
+  defaultSite,
+  createSite,
+  siteAddress,
   CLAIM_STATUSES,
   CLAIM_STATUS_LABELS,
   CLAIM_CATEGORIES,

@@ -46,14 +46,18 @@ test.after(() => server && server.close());
 /** Tiny fetch wrapper that keeps cookies per "browser". */
 function client() {
   const jar = new Map();
-  return async function call(method, url, body, { form = false } = {}) {
+  return async function call(method, url, body, { form = false, manual = false } = {}) {
     const headers = {};
     if (jar.size) headers.Cookie = Array.from(jar, ([k, v]) => `${k}=${v}`).join('; ');
     let payload;
     if (form) payload = body;
     else if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
 
-    const res = await fetch(baseUrl + url, { method, headers, body: payload });
+    // A redirect that sets a cookie has to be read before it is followed,
+    // which is exactly what the one-click sign-in link does.
+    const res = await fetch(baseUrl + url, {
+      method, headers, body: payload, redirect: manual ? 'manual' : 'follow',
+    });
     for (const cookie of res.headers.getSetCookie ? res.headers.getSetCookie() : []) {
       const [pair] = cookie.split(';');
       const idx = pair.indexOf('=');
@@ -61,7 +65,7 @@ function client() {
     }
     const type = res.headers.get('content-type') || '';
     const data = type.includes('json') ? await res.json() : await res.text();
-    return { status: res.status, data };
+    return { status: res.status, data, location: res.headers.get('location') };
   };
 }
 
@@ -71,6 +75,12 @@ const SAMPLE_INVOICE_CSV = [
   'Harbour Kitchen Pty Ltd,INV-90001,15/03/2026,Waldorf RN8610G-B Gas Oven Range,1,8250.00',
   'Harbour Kitchen Pty Ltd,INV-90001,15/03/2026,Freight to Sydney Metro,1,420.00',
 ].join('\n');
+
+/** Follow a one-click sign-in link the way a mail client would. */
+async function followMagicLink(client, url) {
+  const path = String(url).replace(/^https?:\/\/[^/]+/, '');
+  return client('GET', path, undefined, { manual: true });
+}
 
 test('staff sign-in is required for the console', async () => {
   const anon = client();
@@ -84,7 +94,7 @@ test('bad staff password is rejected', async () => {
   assert.strictEqual(res.status, 401);
 });
 
-test('full lifecycle: import invoice, register, lodge a claim, forward it', async () => {
+test('full lifecycle: import invoice, sign in from an email, lodge a claim, forward it', async () => {
   const staff = client();
   const customer = client();
 
@@ -126,10 +136,12 @@ test('full lifecycle: import invoice, register, lodge a claim, forward it', asyn
   assert.ok(upload.data.suggested_customer);
   assert.strictEqual(upload.data.suggested_customer.id, customerId);
 
-  // 4. Commit: quantity 2 must become two separately tracked machines.
+  // 4. Commit: quantity 2 must become two separately tracked machines, and the
+  // warranty starts at the delivery date rather than waiting on the customer.
   const commit = await staff('POST', `/api/admin/invoices/${upload.data.import_id}/commit`, {
     customer_id: customerId,
     lines: upload.data.lines,
+    delivery_date: '2026-03-20',
     send_invite: true,
   });
   assert.strictEqual(commit.status, 201);
@@ -137,14 +149,33 @@ test('full lifecycle: import invoice, register, lodge a claim, forward it', asyn
 
   const tags = new Set(commit.data.devices.map((d) => d.asset_tag));
   assert.strictEqual(tags.size, 3, 'every machine gets its own asset tag');
-  assert.ok(commit.data.devices.every((d) => d.status === 'pending_registration'));
+  assert.ok(commit.data.devices.every((d) => d.status === 'active'),
+    'equipment is live on import — there is no customer registration step');
   assert.ok(commit.data.devices.every((d) => d.purchase_date === '2026-03-15'));
+  assert.ok(commit.data.devices.every((d) => d.delivered_at === '2026-03-20'));
+  assert.ok(commit.data.devices.every((d) => d.warranty_end === '2027-03-20'),
+    'cover runs twelve months from delivery');
+  assert.ok(commit.data.devices.every((d) => d.site_id), 'every machine lands at a site');
 
   // Committing twice must not duplicate the equipment.
   const recommit = await staff('POST', `/api/admin/invoices/${upload.data.import_id}/commit`, { customer_id: customerId });
   assert.strictEqual(recommit.status, 409);
 
-  // 5. The customer signs in with a code.
+  // 5. The handover email carries a link that signs the customer straight in.
+  const handover = db.prepare("SELECT * FROM email_log WHERE template = 'equipment_handover' ORDER BY id DESC").get();
+  assert.ok(handover, 'the customer is told their equipment is on the portal');
+  const linkMatch = handover.body.match(/(https?:\/\/\S*\/go\/[A-Za-z0-9_-]+)/);
+  assert.ok(linkMatch, 'the email contains a one-click sign-in link');
+
+  const linked = client();
+  const followed = await followMagicLink(linked, linkMatch[1]);
+  assert.strictEqual(followed.status, 302);
+  assert.strictEqual(followed.location, '/portal', 'the link lands on the portal');
+  const linkedDevices = await linked('GET', '/api/portal/devices');
+  assert.strictEqual(linkedDevices.status, 200, 'and the customer is signed in');
+  assert.strictEqual(linkedDevices.data.devices.length, 3);
+
+  // 6. The code route still works for anyone who did not keep the email.
   const codeReq = await customer('POST', '/api/auth/request-code', { email: 'jo@harbourkitchen.test' });
   assert.strictEqual(codeReq.status, 200);
   assert.ok(codeReq.data.dev_code, 'dev mode returns the code');
@@ -165,49 +196,42 @@ test('full lifecycle: import invoice, register, lodge a claim, forward it', asyn
   });
   assert.strictEqual(replay.status, 401);
 
-  // 6. Customer sees their equipment, all awaiting registration.
+  // 7. Equipment is already under warranty; nothing to register.
   const devices = await customer('GET', '/api/portal/devices');
   assert.strictEqual(devices.status, 200);
   assert.strictEqual(devices.data.devices.length, 3);
-  assert.strictEqual(devices.data.summary.pending, 3);
+  assert.strictEqual(devices.data.summary.in_warranty, 3);
+  assert.strictEqual(devices.data.sites.length, 1);
 
-  // 7. Update the profile including the on-site after-sales contact.
-  const profile = await customer('PUT', '/api/portal/profile', {
-    company_name: 'Harbour Kitchen Pty Ltd',
-    contact_name: 'Jo Tan',
-    phone: '02 9000 0000',
+  // 8. The site carries the address and the person a technician calls.
+  const siteId = devices.data.sites[0].id;
+  const site = await customer('PUT', `/api/portal/sites/${siteId}`, {
+    name: 'Pyrmont',
     address_line1: '5 Wharf Road',
     suburb: 'Pyrmont',
     state: 'NSW',
     postcode: '2009',
-    site_contact_name: 'Mo Diallo',
-    site_contact_role: 'Head chef',
-    site_contact_phone: '0400 555 666',
-    site_contact_email: 'mo@harbourkitchen.test',
+    contact_name: 'Mo Diallo',
+    contact_role: 'Head chef',
+    contact_phone: '0400 555 666',
+    contact_email: 'mo@harbourkitchen.test',
   });
-  assert.strictEqual(profile.status, 200);
-  assert.strictEqual(profile.data.customer.site_contact_name, 'Mo Diallo');
+  assert.strictEqual(site.status, 200);
+  assert.strictEqual(site.data.site.contact_name, 'Mo Diallo');
 
-  // An incomplete profile is rejected.
-  const badProfile = await customer('PUT', '/api/portal/profile', { company_name: 'Harbour Kitchen Pty Ltd' });
-  assert.strictEqual(badProfile.status, 400);
-  assert.ok(badProfile.data.fields.site_contact_name);
+  const badSite = await customer('PUT', `/api/portal/sites/${siteId}`, { name: 'Pyrmont' });
+  assert.strictEqual(badSite.status, 400);
+  assert.ok(badSite.data.fields.contact_name);
 
-  // 8. Register a machine — this starts the warranty clock.
   const target = devices.data.devices.find((d) => /SD80/.test(d.product_name));
-  const register = await customer('PUT', `/api/portal/devices/${target.id}`, {
-    delivered_at: '2026-03-20',
-    serial_number: 'SN-TEST-0001',
-    location_note: 'Kitchen line, under the pass',
-  });
-  assert.strictEqual(register.status, 200);
-  assert.strictEqual(register.data.device.status, 'registered');
-  assert.strictEqual(register.data.device.warranty_start, '2026-03-20');
-  assert.strictEqual(register.data.device.warranty_end, '2027-03-20', 'delivery date + 12 months');
 
-  // A future delivery date is refused.
-  const future = await customer('PUT', `/api/portal/devices/${target.id}`, { delivered_at: '2099-01-01' });
-  assert.strictEqual(future.status, 400);
+  // A customer cannot rewrite the warranty by editing the delivery date.
+  const tamper = await customer('PUT', `/api/portal/devices/${target.id}`, {
+    delivered_at: '2020-01-01', location_note: 'Kitchen line, under the pass',
+  });
+  assert.strictEqual(tamper.status, 200);
+  assert.strictEqual(tamper.data.device.delivered_at, '2026-03-20', 'delivery date is CHES-controlled');
+  assert.strictEqual(tamper.data.device.location_note, 'Kitchen line, under the pass');
 
   // 9. Lodge a service request against that machine.
   const claimForm = new FormData();
@@ -230,7 +254,6 @@ test('full lifecycle: import invoice, register, lodge a claim, forward it', asyn
   assert.match(chesMail.subject, /URGENT/);
   assert.match(chesMail.body, /Mo Diallo/, 'on-site contact is in the email');
   assert.match(chesMail.body, /0400 555 666/);
-  assert.match(chesMail.body, /SN-TEST-0001/, 'serial number is in the email');
   assert.match(chesMail.body, /IN WARRANTY/);
   assert.match(chesMail.body, /5 Wharf Road/, 'site address is in the email');
   assert.match(chesMail.body, /fault\.jpg/, 'attachment is linked');
@@ -251,8 +274,9 @@ test('full lifecycle: import invoice, register, lodge a claim, forward it', asyn
   const draft = await staff('GET', `/api/admin/claims/${claimId}/forward?manufacturer_id=${mfr.data.manufacturer.id}`);
   assert.strictEqual(draft.status, 200);
   assert.strictEqual(draft.data.to, 'service@simco.test');
-  assert.match(draft.data.body, /SN-TEST-0001/);
   assert.match(draft.data.body, /Error E4/);
+  assert.match(draft.data.body, /5 Wharf Road/, 'the site address goes to the manufacturer');
+  assert.match(draft.data.body, /Mo Diallo/, 'so does the person to call on arrival');
 
   const sent = await staff('POST', `/api/admin/claims/${claimId}/forward`, {
     manufacturer_id: mfr.data.manufacturer.id,

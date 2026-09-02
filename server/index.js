@@ -66,6 +66,20 @@ app.get('/api/files/:id', (req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 
+/**
+ * The link in every email we send: signs the customer in and drops them on
+ * their equipment, or straight onto the machine the link was about.
+ */
+app.get('/go/:token', (req, res) => {
+  const customer = auth.redeemMagicLink(req.params.token);
+  if (!customer) {
+    return res.redirect('/?link=expired');
+  }
+  auth.createSession(res, 'customer', customer.id);
+  const deviceId = v.int(req.query.d, { fallback: 0 });
+  res.redirect(deviceId ? `/portal#device-${deviceId}` : '/portal');
+});
+
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,

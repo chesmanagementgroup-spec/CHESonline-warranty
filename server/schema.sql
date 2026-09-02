@@ -204,6 +204,48 @@ CREATE TABLE IF NOT EXISTS email_log (
 );
 CREATE INDEX IF NOT EXISTS idx_email_log_created ON email_log (created_at DESC);
 
+
+-- Sites: a customer can run several venues, and a machine lives at one of
+-- them. The site carries the address and the person a technician calls, so a
+-- service request from any machine already knows where to go and who to ask
+-- for.
+CREATE TABLE IF NOT EXISTS sites (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id   INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  name          TEXT    NOT NULL,
+  address_line1 TEXT    NOT NULL DEFAULT '',
+  address_line2 TEXT    NOT NULL DEFAULT '',
+  suburb        TEXT    NOT NULL DEFAULT '',
+  state         TEXT    NOT NULL DEFAULT '',
+  postcode      TEXT    NOT NULL DEFAULT '',
+  country       TEXT    NOT NULL DEFAULT 'Australia',
+  contact_name  TEXT    NOT NULL DEFAULT '',
+  contact_role  TEXT    NOT NULL DEFAULT '',
+  contact_phone TEXT    NOT NULL DEFAULT '',
+  contact_email TEXT    NOT NULL DEFAULT '',
+  notes         TEXT    NOT NULL DEFAULT '',
+  is_default    INTEGER NOT NULL DEFAULT 0,
+  archived      INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sites_customer ON sites (customer_id);
+
+-- One-click sign-in links emailed to a customer. A link is a bearer
+-- credential, so it is stored hashed, scoped to one customer, and expires.
+CREATE TABLE IF NOT EXISTS magic_links (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  token_hash  TEXT    NOT NULL,
+  purpose     TEXT    NOT NULL DEFAULT 'portal',
+  device_id   INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+  expires_at  TEXT    NOT NULL,
+  last_used_at TEXT,
+  use_count   INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_magic_token ON magic_links (token_hash);
+
 -- Simple counters for human-readable references ------------------------------
 CREATE TABLE IF NOT EXISTS counters (
   name  TEXT PRIMARY KEY,

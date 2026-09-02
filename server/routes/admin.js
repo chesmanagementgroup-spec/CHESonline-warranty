@@ -4,11 +4,17 @@ const express = require('express');
 const config = require('../config');
 const { db, nextAssetTag } = require('../db');
 const { requireStaff } = require('../auth');
+const auth = require('../auth');
 const v = require('../lib/validate');
+const asyncRoute = require('../lib/asyncRoute');
 const { sendMail } = require('../mailer');
 const templates = require('../lib/templates');
 const { warrantyFor } = require('../lib/dates');
 const {
+  listSites,
+  getSite,
+  createSite,
+  defaultSite,
   CLAIM_STATUSES,
   CLAIM_STATUS_LABELS,
   CLAIM_CATEGORIES,
@@ -39,7 +45,6 @@ router.get('/stats', (req, res) => {
   res.json({
     customers: one('SELECT COUNT(*) AS n FROM customers'),
     devices: devices.length,
-    devices_pending_registration: devices.filter((d) => d.needs_registration).length,
     devices_in_warranty: devices.filter((d) => d.warranty_status === 'active' || d.warranty_status === 'expiring').length,
     devices_expiring_60d: devices.filter((d) => d.warranty_status === 'expiring').length,
     devices_expired: devices.filter((d) => d.warranty_status === 'expired').length,
@@ -72,7 +77,7 @@ router.get('/customers', (req, res) => {
   const rows = db.prepare(`
     SELECT c.*,
       (SELECT COUNT(*) FROM devices d WHERE d.customer_id = c.id) AS device_count,
-      (SELECT COUNT(*) FROM devices d WHERE d.customer_id = c.id AND d.status = 'pending_registration') AS pending_count,
+      (SELECT COUNT(*) FROM sites st WHERE st.customer_id = c.id AND st.archived = 0) AS site_count,
       (SELECT COUNT(*) FROM claims cl WHERE cl.customer_id = c.id AND cl.status NOT IN ('resolved','closed')) AS open_claims
     FROM customers c
     WHERE (@blank = 1
@@ -91,7 +96,12 @@ router.get('/customers/:id', (req, res) => {
   if (!customer) return res.status(404).json({ error: 'not_found' });
   res.json({
     customer,
-    devices: db.prepare('SELECT * FROM devices WHERE customer_id = ? ORDER BY asset_tag').all(id).map(decorateDevice),
+    sites: listSites(id),
+    devices: db.prepare(`
+      SELECT d.*, s.name AS site_name FROM devices d
+      LEFT JOIN sites s ON s.id = d.site_id
+      WHERE d.customer_id = ? ORDER BY s.name COLLATE NOCASE, d.asset_tag
+    `).all(id).map(decorateDevice),
     claims: db.prepare(`
       SELECT cl.*, d.product_name AS device_name, d.asset_tag
       FROM claims cl LEFT JOIN devices d ON d.id = cl.device_id
@@ -141,6 +151,23 @@ router.post('/customers', (req, res) => {
             @suburb, @state, @postcode, @country, @site_contact_name, @site_contact_role,
             @site_contact_phone, @site_contact_email, @notes)
   `).run(fields);
+
+  // Every customer starts with one site; equipment hangs off a site, not off
+  // the customer, so there has to be somewhere for it to land.
+  createSite(info.lastInsertRowid, {
+    name: v.str(b.site_name, 120) || fields.suburb || fields.company_name,
+    address_line1: fields.address_line1,
+    address_line2: fields.address_line2,
+    suburb: fields.suburb,
+    state: fields.state,
+    postcode: fields.postcode,
+    country: fields.country,
+    contact_name: fields.site_contact_name || fields.contact_name,
+    contact_role: fields.site_contact_role,
+    contact_phone: fields.site_contact_phone || fields.phone,
+    contact_email: fields.site_contact_email,
+  });
+
   res.status(201).json({ ok: true, customer: db.prepare('SELECT * FROM customers WHERE id = ?').get(info.lastInsertRowid) });
 });
 
@@ -175,7 +202,7 @@ router.put('/customers/:id', (req, res) => {
 });
 
 /** Nudge a customer to register the equipment we have on file for them. */
-router.post('/customers/:id/invite', async (req, res) => {
+router.post('/customers/:id/invite', asyncRoute(async (req, res) => {
   const id = v.int(req.params.id, { fallback: 0 });
   const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(id);
   if (!customer) return res.status(404).json({ error: 'not_found' });
@@ -183,20 +210,81 @@ router.post('/customers/:id/invite', async (req, res) => {
   const devices = db.prepare('SELECT * FROM devices WHERE customer_id = ? ORDER BY asset_tag').all(id);
   if (!devices.length) return res.status(400).json({ error: 'no_devices' });
 
-  const msg = templates.registrationInvite({
+  const msg = templates.equipmentHandover({
     customer,
-    devices,
+    devices: devices.map(decorateDevice),
     invoiceNumber: v.str(req.body && req.body.invoice_number, 60),
+    site: defaultSite(customer.id),
+    portalUrl: auth.magicLinkUrl(customer.id),
   });
   const result = await sendMail({
     to: customer.email,
     subject: msg.subject,
     text: msg.text,
-    template: 'registration_invite',
+    template: 'equipment_handover',
     relatedType: 'customer',
     relatedId: id,
   });
   res.json({ ok: result.ok, status: result.status });
+}));
+
+// --- Sites ------------------------------------------------------------------
+
+router.get('/customers/:id/sites', (req, res) => {
+  res.json({ sites: listSites(v.int(req.params.id, { fallback: 0 })) });
+});
+
+router.post('/customers/:id/sites', (req, res) => {
+  const customerId = v.int(req.params.id, { fallback: 0 });
+  if (!db.prepare('SELECT id FROM customers WHERE id = ?').get(customerId)) {
+    return res.status(404).json({ error: 'not_found' });
+  }
+  const b = req.body || {};
+  if (!v.str(b.name)) return res.status(400).json({ error: 'validation', fields: { name: 'Site name is required' } });
+  res.status(201).json({
+    ok: true,
+    site: createSite(customerId, {
+      name: v.str(b.name, 120),
+      address_line1: v.str(b.address_line1, 200),
+      address_line2: v.str(b.address_line2, 200),
+      suburb: v.str(b.suburb, 100),
+      state: v.str(b.state, 40),
+      postcode: v.str(b.postcode, 16),
+      contact_name: v.str(b.contact_name, 120),
+      contact_role: v.str(b.contact_role, 120),
+      contact_phone: v.str(b.contact_phone, 40),
+      contact_email: v.email(b.contact_email),
+      notes: v.str(b.notes, 2000),
+    }),
+  });
+});
+
+router.put('/sites/:id', (req, res) => {
+  const site = getSite(v.int(req.params.id, { fallback: 0 }));
+  if (!site) return res.status(404).json({ error: 'not_found' });
+  const b = req.body || {};
+  db.prepare(`
+    UPDATE sites SET name = @name, address_line1 = @address_line1, address_line2 = @address_line2,
+      suburb = @suburb, state = @state, postcode = @postcode,
+      contact_name = @contact_name, contact_role = @contact_role,
+      contact_phone = @contact_phone, contact_email = @contact_email,
+      notes = @notes, updated_at = datetime('now')
+    WHERE id = @id
+  `).run({
+    id: site.id,
+    name: v.str(b.name, 120) || site.name,
+    address_line1: v.str(b.address_line1, 200),
+    address_line2: v.str(b.address_line2, 200),
+    suburb: v.str(b.suburb, 100),
+    state: v.str(b.state, 40),
+    postcode: v.str(b.postcode, 16),
+    contact_name: v.str(b.contact_name, 120),
+    contact_role: v.str(b.contact_role, 120),
+    contact_phone: v.str(b.contact_phone, 40),
+    contact_email: v.email(b.contact_email),
+    notes: v.str(b.notes, 2000),
+  });
+  res.json({ ok: true, site: getSite(site.id) });
 });
 
 // --- Devices ---------------------------------------------------------------
@@ -206,10 +294,12 @@ router.get('/devices', (req, res) => {
   const blank = v.str(req.query.q) ? 0 : 1;
   const customerId = v.int(req.query.customer_id, { fallback: 0 });
   const rows = db.prepare(`
-    SELECT d.*, c.company_name AS customer_name, c.email AS customer_email, m.name AS manufacturer_name
+    SELECT d.*, c.company_name AS customer_name, c.email AS customer_email,
+           m.name AS manufacturer_name, s.name AS site_name
     FROM devices d
     JOIN customers c ON c.id = d.customer_id
     LEFT JOIN manufacturers m ON m.id = d.manufacturer_id
+    LEFT JOIN sites s ON s.id = d.site_id
     WHERE (@customer_id = 0 OR d.customer_id = @customer_id)
       AND (@blank = 1
         OR d.product_name LIKE @q COLLATE NOCASE
@@ -217,6 +307,7 @@ router.get('/devices', (req, res) => {
         OR d.serial_number LIKE @q COLLATE NOCASE
         OR d.asset_tag LIKE @q COLLATE NOCASE
         OR d.invoice_number LIKE @q COLLATE NOCASE
+        OR s.name LIKE @q COLLATE NOCASE
         OR c.company_name LIKE @q COLLATE NOCASE)
     ORDER BY d.id DESC
     LIMIT 500
@@ -247,14 +338,15 @@ router.post('/devices', (req, res) => {
   const manufacturer = b.brand ? findOrCreateManufacturer(b.brand) : null;
   const deliveredAt = require('../lib/dates').toIsoDate(b.delivered_at);
   const info = db.prepare(`
-    INSERT INTO devices (customer_id, asset_tag, invoice_number, product_name, model_code, brand,
+    INSERT INTO devices (customer_id, site_id, asset_tag, invoice_number, product_name, model_code, brand,
                          manufacturer_id, serial_number, purchase_date, delivered_at, warranty_months,
                          location_note, unit_price_ex_gst, status, notes)
-    VALUES (@customer_id, @asset_tag, @invoice_number, @product_name, @model_code, @brand,
+    VALUES (@customer_id, @site_id, @asset_tag, @invoice_number, @product_name, @model_code, @brand,
             @manufacturer_id, @serial_number, @purchase_date, @delivered_at, @warranty_months,
             @location_note, @unit_price_ex_gst, @status, @notes)
   `).run({
     customer_id: customerId,
+    site_id: v.int(b.site_id, { fallback: null }) || (defaultSite(customerId) || {}).id || null,
     asset_tag: v.str(b.asset_tag, 40) || nextAssetTag(),
     invoice_number: v.str(b.invoice_number, 60).toUpperCase(),
     product_name: v.str(b.product_name, 200),
@@ -267,7 +359,7 @@ router.post('/devices', (req, res) => {
     warranty_months: v.int(b.warranty_months, { min: 0, max: 240, fallback: config.defaultWarrantyMonths }),
     location_note: v.str(b.location_note, 200),
     unit_price_ex_gst: v.money(b.unit_price_ex_gst),
-    status: deliveredAt ? 'registered' : 'pending_registration',
+    status: 'active',
     notes: v.str(b.notes, 4000),
   });
 
@@ -286,7 +378,7 @@ router.put('/devices/:id', (req, res) => {
 
   db.prepare(`
     UPDATE devices SET
-      customer_id = @customer_id, invoice_number = @invoice_number, product_name = @product_name,
+      customer_id = @customer_id, site_id = @site_id, invoice_number = @invoice_number, product_name = @product_name,
       model_code = @model_code, brand = @brand, manufacturer_id = @manufacturer_id,
       serial_number = @serial_number, purchase_date = @purchase_date, delivered_at = @delivered_at,
       warranty_months = @warranty_months, location_note = @location_note,
@@ -297,6 +389,7 @@ router.put('/devices/:id', (req, res) => {
   `).run({
     id,
     customer_id: v.int(b.customer_id, { fallback: existing.customer_id }),
+    site_id: v.int(b.site_id, { fallback: existing.site_id }),
     invoice_number: v.str(b.invoice_number, 60).toUpperCase(),
     product_name: v.str(b.product_name, 200) || existing.product_name,
     model_code: v.str(b.model_code, 80),
@@ -366,7 +459,7 @@ router.get('/claims/:id', (req, res) => {
 });
 
 /** Change status, record the factory job number, add internal notes. */
-router.put('/claims/:id', async (req, res) => {
+router.put('/claims/:id', asyncRoute(async (req, res) => {
   const id = v.int(req.params.id, { fallback: 0 });
   const existing = getClaim(id);
   if (!existing) return res.status(404).json({ error: 'not_found' });
@@ -411,6 +504,7 @@ router.put('/claims/:id', async (req, res) => {
         device,
         statusLabel: CLAIM_STATUS_LABELS[status] || status,
         note: v.str(b.customer_note, 2000),
+        portalUrl: auth.magicLinkUrl(customer.id),
       });
       const result = await sendMail({
         to: claim.contact_email || customer.email,
@@ -429,7 +523,7 @@ router.put('/claims/:id', async (req, res) => {
   }
 
   res.json({ ok: true, claim: getClaim(id), events: claimEvents(id) });
-});
+}));
 
 router.post('/claims/:id/notes', (req, res) => {
   const id = v.int(req.params.id, { fallback: 0 });
@@ -486,7 +580,7 @@ router.get('/claims/:id/forward', (req, res) => {
   });
 });
 
-router.post('/claims/:id/forward', async (req, res) => {
+router.post('/claims/:id/forward', asyncRoute(async (req, res) => {
   const id = v.int(req.params.id, { fallback: 0 });
   const claim = getClaim(id);
   if (!claim) return res.status(404).json({ error: 'not_found' });
@@ -535,6 +629,7 @@ router.post('/claims/:id/forward', async (req, res) => {
       device,
       statusLabel: CLAIM_STATUS_LABELS.sent_to_manufacturer,
       note: `We have lodged this with ${manufacturer ? manufacturer.name : 'the manufacturer'} on your behalf.`,
+      portalUrl: auth.magicLinkUrl(customer.id),
     });
     await sendMail({
       to: fresh.contact_email || customer.email,
@@ -547,7 +642,7 @@ router.post('/claims/:id/forward', async (req, res) => {
   }
 
   res.json({ ok: result.ok, status: result.status, error: result.error || '', claim: getClaim(id), events: claimEvents(id) });
-});
+}));
 
 // --- Manufacturers ---------------------------------------------------------
 

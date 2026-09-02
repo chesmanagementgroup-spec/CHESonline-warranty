@@ -56,7 +56,6 @@
       [s.claims_new, T('a_stat_new'), s.claims_new > 0],
       [s.claims_open, T('a_stat_open'), false],
       [s.devices, T('a_stat_devices'), false],
-      [s.devices_pending_registration, T('a_stat_pending'), s.devices_pending_registration > 0],
       [s.devices_in_warranty, T('a_stat_inwarranty'), false],
       [s.devices_expiring_60d, T('a_stat_expiring'), s.devices_expiring_60d > 0],
       [s.customers, T('a_stat_customers'), false],
@@ -221,13 +220,38 @@
           site_contact_name: venue.contact_name,
           site_contact_phone: venue.phone,
           site_contact_email: venue.email,
+          site_name: venue.suburb || venue.company_name,
         }, (created) => {
           customerSelect.appendChild(el('option', { value: String(created.id), text: `${created.company_name} — ${created.email}` }));
           customerSelect.value = String(created.id);
+          refreshSites(created.id);
           createBtn.replaceWith(el('span', { class: 'badge badge-ok', text: T('a_inv_venue_matched') }));
         });
       });
     }
+
+    // Which venue the machines land at, and the date cover starts.
+    const siteSelect = el('select', { id: 'draft_site_id' }, [
+      el('option', { value: '', text: T('a_inv_pick') }),
+      ...(draft.sites || []).map((st) => el('option', { value: String(st.id), text: st.name })),
+    ]);
+    const deliveryInput = el('input', {
+      type: 'date', id: 'draft_delivery_date',
+      value: draft.delivery_date || draft.invoice_date || '',
+    });
+
+    async function refreshSites(customerId) {
+      clear(siteSelect);
+      siteSelect.appendChild(el('option', { value: '', text: T('a_inv_pick') }));
+      if (!customerId) return;
+      const data = await api.get('/api/admin/customers/' + customerId + '/sites').catch(() => ({ sites: [] }));
+      for (const st of data.sites || []) {
+        siteSelect.appendChild(el('option', { value: String(st.id), text: st.name }));
+      }
+      if (siteSelect.options.length === 2) siteSelect.selectedIndex = 1;
+    }
+    customerSelect.addEventListener('change', () => refreshSites(customerSelect.value));
+    if (draft.suggested_customer) refreshSites(draft.suggested_customer.id);
 
     const sendInvite = el('input', { type: 'checkbox', id: 'draft_invite', checked: 'checked' });
     const commitBtn = el('button', { class: 'btn', type: 'button', text: T('a_inv_commit') });
@@ -253,6 +277,10 @@
             el('input', { type: 'text', id: 'draft_invoice_number', value: draft.invoice_number || '' })),
           fieldRow('draft_invoice_date', T('a_inv_date'),
             el('input', { type: 'date', id: 'draft_invoice_date', value: draft.invoice_date || '' })),
+        ]),
+        el('div', { class: 'row-2' }, [
+          fieldRow('draft_site_id', T('a_inv_site'), siteSelect),
+          fieldRow('draft_delivery_date', T('a_inv_delivery'), deliveryInput, T('a_inv_delivery_hint')),
         ]),
         rows.length
           ? table(
@@ -288,8 +316,10 @@
       try {
         const res = await api.post('/api/admin/invoices/' + draft.import_id + '/commit', {
           customer_id: Number(customerId),
+          site_id: siteSelect.value ? Number(siteSelect.value) : null,
           invoice_number: $('#draft_invoice_number').value,
           invoice_date: $('#draft_invoice_date').value,
+          delivery_date: deliveryInput.value,
           lines,
           send_invite: sendInvite.checked,
         });
@@ -537,14 +567,14 @@
       return;
     }
     host.appendChild(table(
-      [T('profile_company'), T('profile_contact'), T('profile_phone'), T('a_stat_devices'), T('a_stat_pending'), T('a_stat_open')],
+      [T('profile_company'), T('profile_contact'), T('profile_phone'), T('a_stat_devices'), T('a_stat_sites'), T('a_stat_open')],
       list.map((c) => ({
         cells: [
           { node: el('strong', { text: c.company_name }) },
           `${c.contact_name || '—'}  ·  ${c.email}`,
           c.phone || '—',
           { num: true, node: document.createTextNode(String(c.device_count)) },
-          { num: true, node: document.createTextNode(String(c.pending_count)) },
+          { num: true, node: document.createTextNode(String(c.site_count || 0)) },
           { num: true, node: document.createTextNode(String(c.open_claims)) },
         ],
         onClick: () => openCustomer(c.id),
@@ -619,14 +649,35 @@
 
     const body = el('div', {}, [form, status]);
 
+    const addSiteBtn = el('button', { class: 'btn btn-ghost btn-sm', type: 'button', text: T('a_site_add') });
+    body.appendChild(el('div', { class: 'field', style: 'margin-top:22px;' }, [
+      el('label', { text: T('a_tab_sites') }),
+      (data.sites || []).length
+        ? table(
+          [T('site_name'), T('profile_address'), T('site_contact'), T('a_stat_devices')],
+          data.sites.map((st) => ({
+            cells: [
+              st.name,
+              [st.address_line1, st.suburb, st.state, st.postcode].filter(Boolean).join(', ') || '—',
+              [st.contact_name, st.contact_phone].filter(Boolean).join('  ·  ') || '—',
+              { num: true, node: document.createTextNode(String(st.device_count || 0)) },
+            ],
+            onClick: () => openSite(st, () => openCustomer(id)),
+          }))
+        )
+        : el('div', { class: 'empty', text: T('site_none') }),
+      el('div', { class: 'btn-row', style: 'margin-top:10px;' }, [addSiteBtn]),
+    ]));
+    addSiteBtn.addEventListener('click', () => openSite({ customer_id: id }, () => openCustomer(id)));
+
     if (data.devices.length) {
       body.appendChild(el('div', { class: 'field', style: 'margin-top:22px;' }, [
         el('label', { text: T('a_tab_devices') }),
         table(
-          [T('dev_asset'), T('dev_product'), T('dev_serial'), T('dev_delivered'), T('dev_warranty')],
+          [T('dev_asset'), T('dev_product'), T('site_one'), T('dev_serial'), T('dev_delivered'), T('dev_warranty')],
           data.devices.map((d) => ({
             cells: [
-              d.asset_tag, d.product_name, d.serial_number || '—', fmtDate(d.delivered_at),
+              d.asset_tag, d.product_name, d.site_name || '—', d.serial_number || '—', fmtDate(d.delivered_at),
               { node: warrantyBadge(d) },
             ],
             onClick: () => openDevice(d.id),
@@ -679,6 +730,52 @@
     });
   }
 
+  // --- Sites ------------------------------------------------------------------
+
+  const SITE_FIELDS = [
+    ['name', 'site_name', true],
+    ['address_line1', 'profile_addr1', false],
+    ['address_line2', 'profile_addr2', false],
+    ['suburb', 'profile_suburb', false],
+    ['state', 'profile_state', false],
+    ['postcode', 'profile_postcode', false],
+    ['contact_name', 'profile_site_name', false],
+    ['contact_role', 'profile_site_role', false],
+    ['contact_phone', 'profile_site_phone', false],
+    ['contact_email', 'profile_site_email', false],
+  ];
+
+  function openSite(site, onSaved) {
+    const form = el('form', { id: 'siteForm', novalidate: 'novalidate' });
+    for (const [name, key, required] of SITE_FIELDS) {
+      form.appendChild(fieldRow('asite_' + name, T(key), el('input', {
+        type: name === 'contact_email' ? 'email' : 'text',
+        id: 'asite_' + name, value: site[name] || '',
+      }), null, required));
+    }
+    const status = el('div', { class: 'status' });
+    form.appendChild(status);
+
+    const saveBtn = el('button', { class: 'btn', type: 'button', text: T('save') });
+    const m = modal({ title: site.id ? site.name : T('a_site_add'), body: form, footer: [saveBtn] });
+
+    saveBtn.addEventListener('click', async () => {
+      clearFieldErrors(form);
+      saveBtn.disabled = true;
+      const payload = {};
+      for (const [name] of SITE_FIELDS) payload[name] = $('#asite_' + name, form).value;
+      try {
+        if (site.id) await api.put('/api/admin/sites/' + site.id, payload);
+        else await api.post('/api/admin/customers/' + site.customer_id + '/sites', payload);
+        m.close();
+        if (onSaved) onSaved();
+      } catch (err) {
+        if (!err.fields || !showFieldErrors(err.fields)) setStatus(status, 'fail', errorMessage(err));
+        saveBtn.disabled = false;
+      }
+    });
+  }
+
   // --- Equipment -----------------------------------------------------------
 
   async function renderDevices() {
@@ -690,16 +787,17 @@
       return;
     }
     host.appendChild(table(
-      [T('dev_asset'), T('dev_product'), T('a_tab_customers'), T('dev_serial'), T('dev_invoice'), T('dev_delivered'), T('dev_warranty')],
+      [T('dev_asset'), T('dev_product'), T('a_tab_customers'), T('site_one'), T('dev_serial'), T('dev_invoice'), T('dev_delivered'), T('dev_warranty')],
       data.devices.map((d) => ({
         cells: [
           d.asset_tag,
           d.product_name + (d.model_code ? '  ·  ' + d.model_code : ''),
           d.customer_name,
+          d.site_name || '—',
           d.serial_number || '—',
           d.invoice_number || '—',
           fmtDate(d.delivered_at),
-          { node: d.needs_registration ? el('span', { class: 'badge badge-dark', text: T('dev_pending') }) : warrantyBadge(d) },
+          { node: warrantyBadge(d) },
         ],
         onClick: () => openDevice(d.id),
       }))

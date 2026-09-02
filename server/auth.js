@@ -144,6 +144,46 @@ function verifyLoginCode(email, code) {
   return { ok: true };
 }
 
+// --- One-click sign-in links ------------------------------------------------
+
+/**
+ * A link emailed to a customer that signs them in when clicked, so they never
+ * type a code to reach their own equipment.
+ *
+ * The link is a bearer credential: anyone holding it is signed in as that
+ * customer until it expires. It is therefore scoped to one customer, stored
+ * only as a hash, given a limited life, and never grants staff access. It
+ * stays usable for its whole life rather than being single-use, because an
+ * emailed link gets opened more than once and a dead link sends the customer
+ * to a support call instead of the portal.
+ */
+function issueMagicLink(customerId, { days = 45, deviceId = null, purpose = 'portal' } = {}) {
+  const token = randomToken();
+  db.prepare(`
+    INSERT INTO magic_links (customer_id, token_hash, purpose, device_id, expires_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(customerId, hashToken(token), purpose, deviceId, isoPlusDays(days));
+  return token;
+}
+
+function magicLinkUrl(customerId, options = {}) {
+  const token = issueMagicLink(customerId, options);
+  const path = options.deviceId ? `/go/${token}?d=${options.deviceId}` : `/go/${token}`;
+  return config.baseUrl + path;
+}
+
+/** Consume a link: returns the customer it belongs to, or null. */
+function redeemMagicLink(token) {
+  if (!token) return null;
+  const row = db.prepare(`
+    SELECT * FROM magic_links WHERE token_hash = ? AND expires_at > datetime('now')
+  `).get(hashToken(String(token)));
+  if (!row) return null;
+  db.prepare("UPDATE magic_links SET last_used_at = datetime('now'), use_count = use_count + 1 WHERE id = ?")
+    .run(row.id);
+  return db.prepare('SELECT * FROM customers WHERE id = ?').get(row.customer_id) || null;
+}
+
 // --- Staff passwords -------------------------------------------------------
 
 function hashPassword(plain) {
@@ -158,6 +198,7 @@ function checkPassword(plain, hash) {
 function pruneExpired() {
   db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
   db.prepare("DELETE FROM login_codes WHERE created_at <= datetime('now', '-7 days')").run();
+  db.prepare("DELETE FROM magic_links WHERE expires_at <= datetime('now', '-7 days')").run();
 }
 
 module.exports = {
@@ -168,6 +209,9 @@ module.exports = {
   destroySession,
   issueLoginCode,
   verifyLoginCode,
+  issueMagicLink,
+  magicLinkUrl,
+  redeemMagicLink,
   hashPassword,
   checkPassword,
   pruneExpired,

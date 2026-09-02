@@ -99,9 +99,9 @@ if (has('demo')) {
   ];
 
   const insertDevice = db.prepare(`
-    INSERT INTO devices (customer_id, asset_tag, invoice_number, product_name, model_code, brand,
+    INSERT INTO devices (customer_id, site_id, asset_tag, invoice_number, product_name, model_code, brand,
                          manufacturer_id, purchase_date, delivered_at, warranty_months, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const [product, brand, model, invoice, purchased, delivered, months] of demoDevices) {
@@ -109,9 +109,10 @@ if (has('demo')) {
     if (exists) continue;
     const mfr = db.prepare('SELECT id FROM manufacturers WHERE lower(name) = lower(?)').get(brand);
     const info = insertDevice.run(
-      customer.id, nextAssetTag(), invoice, product, model, brand,
+      customer.id, (require('../server/lib/models').defaultSite(customer.id) || {}).id || null,
+      nextAssetTag(), invoice, product, model, brand,
       mfr ? mfr.id : null, purchased, delivered, months,
-      delivered ? 'registered' : 'pending_registration'
+      'active'
     );
     refreshWarranty(info.lastInsertRowid);
   }

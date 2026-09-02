@@ -6,11 +6,14 @@ const config = require('../config');
 const { db, nextAssetTag } = require('../db');
 const { requireStaff } = require('../auth');
 const v = require('../lib/validate');
+const asyncRoute = require('../lib/asyncRoute');
 const { documentUpload, attachmentPath } = require('../lib/uploads');
 const { parseInvoiceText, parseInvoiceCsv } = require('../lib/invoiceParser');
 const { toIsoDate } = require('../lib/dates');
-const { refreshWarranty, findOrCreateManufacturer, getDevice, decorateDevice } = require('../lib/models');
+const { refreshWarranty, findOrCreateManufacturer, getDevice, decorateDevice,
+        listSites, getSite, createSite, defaultSite } = require('../lib/models');
 const { sendMail } = require('../mailer');
+const auth = require('../auth');
 const templates = require('../lib/templates');
 
 const router = express.Router();
@@ -33,7 +36,7 @@ function guessCustomer(detectedName) {
  * device lines.  Nothing is created yet — the draft is stored so staff can
  * correct it and then commit.
  */
-router.post('/upload', documentUpload.single('file'), async (req, res) => {
+router.post('/upload', documentUpload.single('file'), asyncRoute(async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'no_file' });
 
   const filePath = attachmentPath(req.file.filename);
@@ -71,7 +74,7 @@ router.post('/upload', documentUpload.single('file'), async (req, res) => {
     stored_name: req.file.filename,
     source: isCsv ? 'csv' : 'pdf',
     invoice_number: parsed.invoice_number || '',
-    invoice_date: parsed.invoice_date || null,
+    invoice_date: parsed.delivery_date || parsed.invoice_date || null,
     customer_id: suggested ? suggested.id : null,
     detected_customer: parsed.detected_customer || '',
     raw_text: rawText.slice(0, 200000),
@@ -84,8 +87,10 @@ router.post('/upload', documentUpload.single('file'), async (req, res) => {
     import_id: info.lastInsertRowid,
     invoice_number: parsed.invoice_number || '',
     invoice_date: parsed.invoice_date || null,
+    delivery_date: parsed.delivery_date || null,
     detected_customer: parsed.detected_customer || '',
     suggested_customer: suggested || null,
+    sites: suggested ? listSites(suggested.id) : [],
     customer_details: parsed.customer_details || null,
     reference: parsed.reference || '',
     lines: parsed.lines || [],
@@ -93,7 +98,7 @@ router.post('/upload', documentUpload.single('file'), async (req, res) => {
     warning: (parsed.lines || []).length ? null : 'no_lines_found',
     source: isCsv ? 'csv' : 'pdf',
   });
-});
+}));
 
 router.get('/', (req, res) => {
   res.json({
@@ -130,7 +135,7 @@ router.get('/:id/text', (req, res) => {
  * separate device records, because warranty and faults are tracked per
  * machine, not per invoice line.
  */
-router.post('/:id/commit', async (req, res) => {
+router.post('/:id/commit', asyncRoute(async (req, res) => {
   const importId = v.int(req.params.id, { fallback: 0 });
   const record = db.prepare('SELECT * FROM invoice_imports WHERE id = ?').get(importId);
   if (!record) return res.status(404).json({ error: 'not_found' });
@@ -145,6 +150,25 @@ router.post('/:id/commit', async (req, res) => {
 
   const invoiceNumber = (v.str(b.invoice_number, 60) || record.invoice_number || '').toUpperCase();
   const invoiceDate = toIsoDate(b.invoice_date) || record.invoice_date || null;
+  // Warranty runs from delivery. The invoice states it; the invoice date is
+  // only the fallback when it does not.
+  const deliveryDate = toIsoDate(b.delivery_date) || invoiceDate;
+
+  let site = v.int(b.site_id, { fallback: 0 }) ? getSite(v.int(b.site_id, { fallback: 0 })) : null;
+  if (site && site.customer_id !== customer.id) site = null;
+  if (!site && v.str(b.new_site_name)) {
+    site = createSite(customer.id, {
+      name: v.str(b.new_site_name, 120),
+      address_line1: v.str(b.new_site_address_line1, 200),
+      suburb: v.str(b.new_site_suburb, 100),
+      state: v.str(b.new_site_state, 40),
+      postcode: v.str(b.new_site_postcode, 16),
+      contact_name: v.str(b.new_site_contact_name, 120),
+      contact_phone: v.str(b.new_site_contact_phone, 40),
+      contact_email: v.email(b.new_site_contact_email),
+    });
+  }
+  if (!site) site = defaultSite(customer.id);
   const lines = Array.isArray(b.lines) ? b.lines : JSON.parse(record.parsed_json || '[]');
   const chosen = lines.filter((l) => l && l.include !== false && v.str(l.description));
 
@@ -153,12 +177,12 @@ router.post('/:id/commit', async (req, res) => {
   }
 
   const insertDevice = db.prepare(`
-    INSERT INTO devices (customer_id, asset_tag, invoice_number, product_name, model_code, brand,
-                         manufacturer_id, serial_number, purchase_date, warranty_months,
+    INSERT INTO devices (customer_id, site_id, asset_tag, invoice_number, product_name, model_code, brand,
+                         manufacturer_id, serial_number, purchase_date, delivered_at, warranty_months,
                          unit_price_ex_gst, status, notes)
-    VALUES (@customer_id, @asset_tag, @invoice_number, @product_name, @model_code, @brand,
-            @manufacturer_id, @serial_number, @purchase_date, @warranty_months,
-            @unit_price_ex_gst, 'pending_registration', @notes)
+    VALUES (@customer_id, @site_id, @asset_tag, @invoice_number, @product_name, @model_code, @brand,
+            @manufacturer_id, @serial_number, @purchase_date, @delivered_at, @warranty_months,
+            @unit_price_ex_gst, 'active', @notes)
   `);
 
   const createdIds = [];
@@ -172,6 +196,7 @@ router.post('/:id/commit', async (req, res) => {
       for (let unit = 0; unit < quantity; unit++) {
         const info = insertDevice.run({
           customer_id: customerId,
+          site_id: site ? site.id : null,
           asset_tag: nextAssetTag(),
           invoice_number: invoiceNumber,
           product_name: v.str(line.description, 200),
@@ -180,6 +205,7 @@ router.post('/:id/commit', async (req, res) => {
           manufacturer_id: manufacturer ? manufacturer.id : null,
           serial_number: v.str(serials[unit], 120),
           purchase_date: invoiceDate,
+          delivered_at: deliveryDate,
           warranty_months: v.int(line.warranty_months, { min: 0, max: 240, fallback: config.defaultWarrantyMonths }),
           unit_price_ex_gst: v.money(line.unit_price_ex_gst),
           notes: quantity > 1 ? `Unit ${unit + 1} of ${quantity} on ${invoiceNumber || 'this invoice'}.` : '',
@@ -189,10 +215,11 @@ router.post('/:id/commit', async (req, res) => {
     }
 
     db.prepare(`
-      UPDATE invoice_imports SET status = 'committed', customer_id = ?, invoice_number = ?,
+      UPDATE invoice_imports SET status = 'committed', customer_id = ?, site_id = ?, invoice_number = ?,
         invoice_date = ?, parsed_json = ?, devices_created = ?, committed_at = datetime('now')
       WHERE id = ?
-    `).run(customerId, invoiceNumber, invoiceDate, JSON.stringify(lines), createdIds.length, importId);
+    `).run(customerId, site ? site.id : null, invoiceNumber, invoiceDate,
+           JSON.stringify(lines), createdIds.length, importId);
   });
   commit();
 
@@ -201,12 +228,16 @@ router.post('/:id/commit', async (req, res) => {
 
   let invite = null;
   if (b.send_invite) {
-    const msg = templates.registrationInvite({ customer, devices, invoiceNumber });
+    const msg = templates.equipmentHandover({
+      customer, devices, invoiceNumber, site,
+      portalUrl: auth.magicLinkUrl(customer.id),
+    });
     invite = await sendMail({
-      to: customer.email,
+      to: (site && site.contact_email) || customer.email,
+      cc: site && site.contact_email && site.contact_email !== customer.email ? customer.email : '',
       subject: msg.subject,
       text: msg.text,
-      template: 'registration_invite',
+      template: 'equipment_handover',
       relatedType: 'customer',
       relatedId: customer.id,
     });
@@ -218,7 +249,7 @@ router.post('/:id/commit', async (req, res) => {
     devices,
     invite_status: invite ? invite.status : null,
   });
-});
+}));
 
 router.delete('/:id', (req, res) => {
   const id = v.int(req.params.id, { fallback: 0 });

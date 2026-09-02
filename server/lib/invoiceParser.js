@@ -113,6 +113,20 @@ function findInvoiceDate(lines) {
   return m ? toIsoDate(m[1]) : null;
 }
 
+/**
+ * The delivery date CHES notes on the invoice. This is what the warranty runs
+ * from, so it is looked for before falling back to the invoice date.
+ */
+function findDeliveryDate(lines) {
+  const labelled = valueAfterLabel(lines, /^(delivery|delivered|dispatch|despatch|handover|install(ation)?)\s*date\s*[:\-]?/i);
+  const iso = toIsoDate(labelled);
+  if (iso) return iso;
+
+  // Also accept it written inline anywhere, e.g. "Delivery date: 12 Sep 2026".
+  const m = lines.join('\n').match(/(?:delivery|delivered|dispatch|handover|install(?:ation)?)\s*date\s*[:\-]?\s*([0-9A-Za-z ,.\/-]{6,20})/i);
+  return m ? toIsoDate(m[1].trim()) : null;
+}
+
 /** The quote or project this invoice came from, e.g. "QU-23602: ...". */
 function findReference(lines) {
   const value = valueAfterLabel(lines, /^reference\s*[:\-]?/i);
@@ -467,6 +481,7 @@ function parseInvoiceText(text) {
   return {
     invoice_number: findInvoiceNumber(lines),
     invoice_date: findInvoiceDate(lines),
+    delivery_date: findDeliveryDate(lines),
     reference: findReference(lines),
     detected_customer: (details && details.company_name) || findCustomer(lines),
     customer_details: details,
@@ -587,6 +602,7 @@ module.exports = {
   parseInvoiceText,
   parseLineItem,
   findCustomerDetails,
+  findDeliveryDate,
   warrantyMonthsFrom,
   serialsFrom,
   parseInvoiceCsv,

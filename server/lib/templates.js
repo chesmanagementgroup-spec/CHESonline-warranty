@@ -29,6 +29,16 @@ function addressOf(customer) {
   ].filter((p) => p && String(p).trim()).join(', ');
 }
 
+/**
+ * Every message to a customer ends with the same one-click way back in, so
+ * reaching their equipment never requires remembering anything.
+ */
+function signInBlock(portalUrl) {
+  return portalUrl
+    ? `See all your equipment and its warranty status:\n  ${portalUrl}`
+    : `Portal: ${config.baseUrl}`;
+}
+
 /** 6-digit sign-in code sent to a customer. */
 function loginCode({ code, minutes }) {
   return {
@@ -110,7 +120,7 @@ function newClaimToChes({ claim, customer, device, warranty, attachments }) {
 }
 
 /** Acknowledgement to the customer who lodged the request. */
-function claimReceipt({ claim, customer, device }) {
+function claimReceipt({ claim, customer, device, portalUrl }) {
   return {
     subject: `We've received your service request — ${claim.reference}`,
     text: joinBlocks([
@@ -128,7 +138,7 @@ function claimReceipt({ claim, customer, device }) {
       + '     with them on your behalf and send you their job number.\n'
       + '  3. The technician or manufacturer contacts your on-site person to\n'
       + '     arrange attendance.',
-      `You can track this request at ${config.baseUrl}`,
+      signInBlock(portalUrl),
       `Please quote ${claim.reference} in any correspondence.`,
       RULE,
       `CHES Online · ${config.ches.serviceEmail}`,
@@ -184,7 +194,7 @@ function forwardToManufacturer({ claim, customer, device, manufacturer, warranty
 }
 
 /** Status change notification to the customer. */
-function claimStatusUpdate({ claim, customer, device, statusLabel, note }) {
+function claimStatusUpdate({ claim, customer, device, statusLabel, note, portalUrl }) {
   return {
     subject: `Update on ${claim.reference} — ${statusLabel}`,
     text: joinBlocks([
@@ -197,28 +207,45 @@ function claimStatusUpdate({ claim, customer, device, statusLabel, note }) {
         ['Manufacturer', claim.manufacturer_ref ? `job ${claim.manufacturer_ref}` : ''],
       ]),
       note ? ['NOTE FROM CHES', ...String(note).split('\n').map((l) => '  ' + l)].join('\n') : null,
-      `Track this request at ${config.baseUrl}`,
+      signInBlock(portalUrl),
       RULE,
       `CHES Online · ${config.ches.serviceEmail}`,
     ]),
   };
 }
 
-/** Invitation sent after CHES imports an invoice, asking the customer to register. */
-function registrationInvite({ customer, devices, invoiceNumber }) {
+/**
+ * Sent once CHES has processed an invoice. There is nothing for the customer
+ * to fill in — the equipment is already on their account and under warranty —
+ * so this is a handover note plus the link that gets them back to it.
+ */
+function equipmentHandover({ customer, devices, invoiceNumber, site, portalUrl }) {
+  const byWarranty = devices
+    .slice(0, 40)
+    .map((d) => `  ${d.asset_tag}  ${d.product_name}`
+      + (d.warranty_end ? `\n${' '.repeat(4)}covered to ${d.warranty_end}` : ''));
+
   return {
-    subject: `Register your new equipment with CHES Online${invoiceNumber ? ` — ${invoiceNumber}` : ''}`,
+    subject: `Your equipment and warranty details${invoiceNumber ? ` — ${invoiceNumber}` : ''}`,
     text: joinBlocks([
       `Hi ${customer.contact_name || customer.company_name},`,
-      `Your equipment from CHES Online${invoiceNumber ? ` (invoice ${invoiceNumber})` : ''} is now on your\n`
-      + 'warranty portal. Once it arrives, please take two minutes to confirm the\n'
-      + 'delivery date and your on-site contact — that starts your warranty cover\n'
-      + 'and means a future service request takes about 30 seconds to lodge.',
-      ['EQUIPMENT ON YOUR ACCOUNT (' + devices.length + ')',
-        ...devices.slice(0, 30).map((d) => `  ${d.asset_tag}  ${d.product_name}`),
-        devices.length > 30 ? `  … and ${devices.length - 30} more` : null,
-      ].filter(Boolean).join('\n'),
-      `Sign in with this email address — no password needed:\n  ${config.baseUrl}`,
+      `Your equipment from CHES Online${invoiceNumber ? ` (invoice ${invoiceNumber})` : ''} is now on\n`
+      + 'your warranty portal, with its serial numbers and warranty dates already\n'
+      + 'recorded. There is nothing you need to fill in.',
+      site ? block('Delivered to', [
+        ['Site', site.name],
+        ['Address', addressOf({
+          address_line1: site.address_line1, address_line2: site.address_line2,
+          suburb: site.suburb, state: site.state, postcode: site.postcode, country: site.country,
+        })],
+        ['On-site contact', site.contact_name],
+      ]) : null,
+      ['YOUR EQUIPMENT (' + devices.length + ')', ...byWarranty,
+        devices.length > 40 ? `  … and ${devices.length - 40} more` : null].filter(Boolean).join('\n'),
+      'If something goes wrong, open the link below, pick the machine and tell us\n'
+      + 'what it is doing. We check the warranty and lodge it with the manufacturer\n'
+      + 'for you.',
+      signInBlock(portalUrl),
       RULE,
       `CHES Online · ${config.ches.serviceEmail}`,
     ]),
@@ -231,6 +258,7 @@ module.exports = {
   claimReceipt,
   forwardToManufacturer,
   claimStatusUpdate,
-  registrationInvite,
+  equipmentHandover,
+  signInBlock,
   addressOf,
 };

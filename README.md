@@ -7,7 +7,7 @@ Two front doors onto one database:
 
 | | Who | What they do |
 |---|---|---|
-| `/` → `/portal` | The customer | Register equipment as it arrives, keep their address / phone / on-site after-sales contact current, see what is still in warranty, and report a fault by picking the machine off their own list |
+| `/` → `/portal` | The customer | See their equipment grouped by venue with its warranty status, keep each venue's address and on-site after-sales contact current, and report a fault by picking the machine off their own list |
 | `/admin` | CHES staff | Upload a Xero **INVOICE** and turn it into tracked equipment records, maintain customer and equipment details, and forward a service request on to the manufacturer |
 
 Every service request lands in the CHES inbox as a system email the moment it
@@ -40,10 +40,19 @@ Xero INVOICE (PDF/CSV)
         └──► pre-written email to the brand's service inbox, replies come back to CHES
 ```
 
-**Warranty is counted from the date the machine was received on site**, not
-from the invoice date. Until the customer confirms delivery, the portal shows a
-*provisional* end date derived from the invoice and keeps the machine flagged
-as awaiting registration.
+**Warranty is counted from the delivery date**, which CHES states on the
+invoice — the parser reads it, and the invoice date is only the fallback. There
+is no customer registration step: equipment is live and under warranty from the
+moment its invoice is imported.
+
+**A customer can run several venues.** Equipment belongs to a *site*, and the
+site carries the address and the person a technician asks for on arrival, so a
+request lodged against any machine already knows where to go and who to call.
+
+**Every email to a customer carries a one-click sign-in link** (`/go/<token>`),
+so reaching their equipment never requires remembering anything. The link is a
+bearer credential: scoped to one customer, stored hashed, and expired after 45
+days.
 
 A line with quantity 3 becomes **three separate machines**, each with its own
 asset tag and serial number field — because faults and warranties happen per
