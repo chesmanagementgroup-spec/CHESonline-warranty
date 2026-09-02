@@ -87,12 +87,19 @@
     const thead = el('thead', {}, [el('tr', {}, headings.map((h) => el('th', {}, [
       typeof h === 'string' ? document.createTextNode(h) : h,
     ])))]);
-    const tbody = el('tbody', {}, rows.map((r) => el('tr', {
-      class: r.onClick ? 'clickable' : null,
-      onclick: r.onClick || null,
-    }, r.cells.map((c) => el('td', { class: c && c.num ? 'num' : null },
-      [typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : (c && c.node) || c || '']
-    )))));
+    const tbody = el('tbody', {}, rows.map((r) => {
+      if (r.span) {
+        return el('tr', { class: 'row-detail' }, [
+          el('td', { colspan: String(headings.length) }, [r.cells]),
+        ]);
+      }
+      return el('tr', {
+        class: r.onClick ? 'clickable' : null,
+        onclick: r.onClick || null,
+      }, r.cells.map((c) => el('td', { class: c && c.num ? 'num' : null },
+        [typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : (c && c.node) || c || '']
+      )));
+    }));
     return el('div', { class: 'table-wrap' }, [el('table', {}, [thead, tbody])]);
   }
 
@@ -148,34 +155,68 @@
       })),
     ]);
 
-    const rows = draft.lines.map((line, i) => {
+    // Every physical machine gets its own row and its own serial box. Two of
+    // the same model are two records with two warranties, so a fault on one
+    // must never be able to look like a fault on the other — and that only
+    // works if the serials are entered per machine, not as one shared field.
+    const rows = [];
+
+    draft.lines.forEach((line, i) => {
       const include = el('input', { type: 'checkbox', id: 'line_include_' + i, checked: line.include ? 'checked' : null });
-      const desc = el('input', { type: 'text', id: 'line_desc_' + i, value: line.description, style: 'min-width:320px;' });
-      const qty = el('input', { type: 'number', id: 'line_qty_' + i, value: String(line.quantity), min: '1', max: '200', style: 'width:70px;' });
-      const brand = el('input', { type: 'text', id: 'line_brand_' + i, value: line.brand || '', style: 'min-width:110px;' });
-      const model = el('input', { type: 'text', id: 'line_model_' + i, value: line.model_code || '', style: 'min-width:110px;' });
+      const desc = el('input', { type: 'text', id: 'line_desc_' + i, value: line.description, style: 'min-width:300px;' });
+      const qty = el('input', { type: 'number', id: 'line_qty_' + i, value: String(line.quantity), min: '1', max: '200', style: 'width:64px;' });
+      const brand = el('input', { type: 'text', id: 'line_brand_' + i, value: line.brand || '', style: 'min-width:104px;' });
+      const model = el('input', { type: 'text', id: 'line_model_' + i, value: line.model_code || '', style: 'min-width:104px;' });
       const months = el('input', {
-        type: 'number', id: 'line_months_' + i, min: '0', max: '240', style: 'width:80px;',
+        type: 'number', id: 'line_months_' + i, min: '0', max: '240', style: 'width:74px;',
         value: String(line.warranty_months || state.meta.default_warranty_months),
       });
-      // Serials often appear on the invoice; one per machine, in order.
-      const serials = el('input', {
-        type: 'text', id: 'line_serials_' + i, style: 'min-width:170px;',
-        value: (line.serial_numbers || []).join(', '),
-        placeholder: line.quantity > 1 ? 'one per machine, comma separated' : '',
-      });
-      return {
+
+      rows.push({
         cells: [
           { node: include },
           { node: desc },
           { node: qty },
           { node: brand },
           { node: model },
-          { node: serials },
           { node: months },
           fmtMoney(line.unit_price_ex_gst),
         ],
-      };
+      });
+
+      // One serial row per machine, rebuilt whenever the quantity changes.
+      const unitHost = el('div', { id: 'line_units_' + i, style: 'display:grid; gap:5px;' });
+
+      function renderUnits() {
+        const count = Math.max(1, Math.min(200, Number(qty.value) || 1));
+        const existing = Array.from(unitHost.querySelectorAll('input')).map((n) => n.value);
+        const parsed = line.serial_numbers || [];
+        clear(unitHost);
+        for (let u = 0; u < count; u++) {
+          unitHost.appendChild(el('div', { style: 'display:flex; align-items:center; gap:8px;' }, [
+            el('span', {
+              style: 'font-size:12px; color:var(--text-2); min-width:96px;',
+              text: T('a_inv_unit', { n: u + 1, total: count }),
+            }),
+            el('input', {
+              type: 'text', id: `line_serial_${i}_${u}`,
+              value: existing[u] !== undefined ? existing[u] : (parsed[u] || ''),
+              placeholder: T('a_inv_serial_each'),
+              style: 'flex:1; min-width:160px;',
+            }),
+          ]));
+        }
+      }
+      renderUnits();
+      qty.addEventListener('input', renderUnits);
+
+      rows.push({
+        span: true,
+        cells: el('div', {}, [
+          el('div', { style: 'font-size:12px; font-weight:600; margin-bottom:6px;', text: T('a_inv_units') }),
+          unitHost,
+        ]),
+      });
     });
 
     // A rent-try-buy invoice is billed to the finance company, but the venue
@@ -284,11 +325,11 @@
         ]),
         rows.length
           ? table(
-            [T('a_inv_include'), T('a_inv_desc'), T('a_inv_qty'), T('a_inv_brand'), T('a_inv_model'), T('dev_serial'), T('a_inv_warranty'), T('a_inv_price')],
+            [T('a_inv_include'), T('a_inv_desc'), T('a_inv_qty'), T('a_inv_brand'), T('a_inv_model'), T('a_inv_warranty'), T('a_inv_price')],
             rows
           )
           : el('div', { class: 'empty', text: T('a_inv_nolines') }),
-        el('div', { class: 'hint', style: 'margin-top:10px;', text: T('a_inv_qty_note') }),
+        el('div', { class: 'hint', style: 'margin-top:10px;', text: T('a_inv_serial_hint') }),
         el('div', { class: 'check-row', style: 'margin-top:16px;' }, [sendInvite, el('span', { text: T('a_inv_invite') })]),
         el('div', { class: 'btn-row', style: 'margin-top:16px;' }, [commitBtn]),
         status,
@@ -302,16 +343,26 @@
         return;
       }
       commitBtn.disabled = true;
-      const lines = draft.lines.map((line, i) => ({
-        ...line,
-        include: $('#line_include_' + i).checked,
-        description: $('#line_desc_' + i).value,
-        quantity: Number($('#line_qty_' + i).value) || 1,
-        brand: $('#line_brand_' + i).value,
-        model_code: $('#line_model_' + i).value,
-        serial_numbers: $('#line_serials_' + i).value.split(',').map((x) => x.trim()).filter(Boolean),
-        warranty_months: Number($('#line_months_' + i).value),
-      }));
+      const lines = draft.lines.map((line, i) => {
+        const quantity = Number($('#line_qty_' + i).value) || 1;
+        const serials = [];
+        for (let u = 0; u < quantity; u++) {
+          const box = $(`#line_serial_${i}_${u}`);
+          serials.push(box ? box.value.trim() : '');
+        }
+        return {
+          ...line,
+          include: $('#line_include_' + i).checked,
+          description: $('#line_desc_' + i).value,
+          quantity,
+          brand: $('#line_brand_' + i).value,
+          model_code: $('#line_model_' + i).value,
+          // Positional: serial 1 goes to machine 1. A blank stays blank rather
+          // than shifting the next machine's serial onto this one.
+          serial_numbers: serials,
+          warranty_months: Number($('#line_months_' + i).value),
+        };
+      });
 
       try {
         const res = await api.post('/api/admin/invoices/' + draft.import_id + '/commit', {
