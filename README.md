@@ -24,11 +24,13 @@ Xero INVOICE (PDF/CSV)
         ▼
   parsed line items ──► staff check and correct ──► one device record per machine
                                                        (asset tag CHES-000123)
+        │            (serials and warranty months come off the invoice too;
+        │             quantity 3 becomes 3 machines, each at a chosen SITE)
         │
-        │  optional: "email the customer to register"
+        │  warranty starts at the DELIVERY DATE stated on the invoice
         ▼
-  customer signs in with an emailed code, confirms the DELIVERY DATE
-        │                                        └─ warranty clock starts here
+  customer gets a handover email with a one-click link — nothing to fill in
+        │
         ▼
   something breaks → customer picks the machine → service request WR-2026-0001
         │
